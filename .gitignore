@@ -66,3 +66,21 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+# Visual Studio (CMake) та інші IDE
+.vs/
+out/
+CMakeUserPresets.json
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Результати пакетної обробки (проміжні кадри та метрики)
+results/
+output/
+*.csv
+!docs/**/*.csv
+
+# Системні файли ОС
+Thumbs.db
+.DS_Store
