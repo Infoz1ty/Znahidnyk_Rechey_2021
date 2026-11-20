@@ -1,0 +1,21 @@
+{
+  "pipeline_id": "p1",
+  "pipeline_name": "Color-Morphological Pipeline",
+  "owner": "member1",
+  "stage1_median": {
+    "kernel_size": 5
+  },
+  "stage2_hsv_segmentation": {
+    "bg_s_max": 45,
+    "bg_v_min": 140,
+    "bg_v_max": 245,
+    "use_border_bg_estimation": true,
+    "border_margin_px": 20,
+    "color_distance_threshold": 30.0
+  },
+  "stage3_morphology": {
+    "close_kernel_size": 5,
+    "open_kernel_size": 3,
+    "fill_holes": true
+  }
+}
