@@ -1,0 +1,23 @@
+{
+  "pipeline_id": "p3",
+  "pipeline_name": "Gradient-Watershed Pipeline",
+  "owner": "member2",
+  "stage1_bilateral_unsharp": {
+    "bilateral_radius": 3,
+    "sigma_spatial": 3.0,
+    "sigma_range": 25.0,
+    "unsharp_sigma": 1.0,
+    "unsharp_amount": 1.2
+  },
+  "stage2_sobel_gradient": {
+    "normalize_output": true,
+    "fg_threshold_method": "otsu",
+    "fg_threshold_offset": 0.0
+  },
+  "stage3_watershed": {
+    "distance_metric": "chamfer",
+    "peak_min_ratio": 0.45,
+    "peak_min_distance_px": 15,
+    "min_marker_area_px": 120
+  }
+}

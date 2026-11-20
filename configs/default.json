@@ -1,0 +1,61 @@
+{
+  "seed": 42,
+  "preprocessing": {
+    "max_side_px": 1600,
+    "stud_size_px": 30,
+    "min_image_side_px": 3,
+    "max_image_side_px": 8000
+  },
+  "noise_benchmark": {
+    "enabled": false,
+    "noise_type": "gaussian",
+    "gaussian_sigma": 15.0,
+    "salt_pepper_prob": 0.02
+  },
+  "shape_classifier": {
+    "min_area_ratio": 0.5,
+    "round_circularity_min": 0.82,
+    "aspect_ratio_tolerance": 0.25,
+    "stud_area_tolerance": 0.35,
+    "classes": [
+      { "name": "1x1_round", "studs_area": 0.79, "aspect_ratio": 1.0, "is_round": true },
+      { "name": "1x1", "studs_area": 1.0, "aspect_ratio": 1.0, "is_round": false },
+      { "name": "1x2", "studs_area": 2.0, "aspect_ratio": 2.0, "is_round": false },
+      { "name": "1x3", "studs_area": 3.0, "aspect_ratio": 3.0, "is_round": false },
+      { "name": "1x4", "studs_area": 4.0, "aspect_ratio": 4.0, "is_round": false },
+      { "name": "1x6", "studs_area": 6.0, "aspect_ratio": 6.0, "is_round": false },
+      { "name": "2x2", "studs_area": 4.0, "aspect_ratio": 1.0, "is_round": false },
+      { "name": "2x3", "studs_area": 6.0, "aspect_ratio": 1.5, "is_round": false },
+      { "name": "2x4", "studs_area": 8.0, "aspect_ratio": 2.0, "is_round": false },
+      { "name": "2x6", "studs_area": 12.0, "aspect_ratio": 3.0, "is_round": false }
+    ]
+  },
+  "color_classifier": {
+    "erosion_kernel": 3,
+    "shadow_v_min": 40,
+    "glare_s_max": 25,
+    "glare_v_min": 235,
+    "palette_hsv": {
+      "White":  { "h": [0, 360], "s": [0, 35],   "v": [185, 255] },
+      "Gray":   { "h": [0, 360], "s": [0, 35],   "v": [65, 184] },
+      "Black":  { "h": [0, 360], "s": [0, 255],  "v": [0, 64] },
+      "Red":    { "h": [345, 15], "s": [80, 255], "v": [65, 255] },
+      "Orange": { "h": [16, 38],  "s": [90, 255], "v": [80, 255] },
+      "Yellow": { "h": [39, 68],  "s": [80, 255], "v": [90, 255] },
+      "Green":  { "h": [69, 165], "s": [60, 255], "v": [50, 255] },
+      "Blue":   { "h": [166, 260],"s": [60, 255], "v": [50, 255] }
+    }
+  },
+  "visualizer": {
+    "dim_factor": 0.3,
+    "box_thickness": 3,
+    "highlight_color_rgb": [0, 255, 128],
+    "default_box_color_rgb": [255, 215, 0]
+  },
+  "output": {
+    "save_stages": true,
+    "save_annotated": true,
+    "metrics_csv": "metrics.csv",
+    "summary_json": "summary.json"
+  }
+}
