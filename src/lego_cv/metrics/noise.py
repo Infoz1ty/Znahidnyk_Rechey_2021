@@ -5,10 +5,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import numpy as np
+import numpy as np
 
 
 def add_gaussian_noise(
@@ -19,14 +16,27 @@ def add_gaussian_noise(
     """Накладає адитивний гаусів шум ``N(0, sigma^2)`` із фіксованим ``seed``.
 
     Args:
-        image: Вхідне зображення ``uint8``.
-        sigma: Стандартне відхилення шуму.
+        image: Вхідне зображення ``uint8`` (2D grayscale або 3D RGB).
+        sigma: Стандартне відхилення шуму (має бути ``>= 0``).
         seed: Зерно генератора ``np.random.default_rng(seed)`` для відтворюваності.
 
     Returns:
-        Зашумлене зображення ``uint8`` тієї самої форми.
+        Зашумлене зображення ``uint8`` тієї самої форми з кліпінгом у ``[0, 255]``.
+
+    Raises:
+        ValueError: Якщо ``sigma < 0``.
     """
-    raise NotImplementedError("TODO (T1.6, Учасник 2): реалізувати add_gaussian_noise.")
+    if sigma < 0.0:
+        raise ValueError(f"Параметр sigma має бути невід'ємним, отримано {sigma}.")
+
+    arr = np.asarray(image, dtype=np.float64)
+    if arr.size == 0 or sigma == 0.0:
+        return np.clip(np.rint(arr), 0.0, 255.0).astype(np.uint8)
+
+    rng = np.random.default_rng(seed)
+    noise = rng.normal(loc=0.0, scale=float(sigma), size=arr.shape)
+    noisy = np.clip(np.rint(arr + noise), 0.0, 255.0)
+    return noisy.astype(np.uint8)
 
 
 def add_salt_pepper_noise(
@@ -36,14 +46,35 @@ def add_salt_pepper_noise(
 ) -> np.ndarray:
     """Накладає імпульсний шум «сіль і перець» із фіксованим ``seed``.
 
+    Для багатоканальних зображень імпульс застосовується до всього пікселя ``(y, x)``,
+    переводячи його в ``0`` (перець) або ``255`` (сіль) із рівною ймовірністю ``prob / 2``.
+
     Args:
         image: Вхідне зображення ``uint8``.
-        prob: Сумарна частка зашумлених пікселів (половина -> 0, половина -> 255).
+        prob: Сумарна частка зашумлених пікселів у діапазоні ``[0.0, 1.0]``.
         seed: Зерно генератора ``np.random.default_rng(seed)``.
 
     Returns:
         Зашумлене зображення ``uint8`` тієї самої форми.
+
+    Raises:
+        ValueError: Якщо ``prob`` виходить за межі ``[0.0, 1.0]``.
     """
-    raise NotImplementedError(
-        "TODO (T1.6, Учасник 2): реалізувати add_salt_pepper_noise."
-    )
+    if not 0.0 <= prob <= 1.0:
+        raise ValueError(f"Параметр prob має належати [0.0, 1.0], отримано {prob}.")
+
+    noisy = np.clip(np.asarray(image), 0, 255).astype(np.uint8, copy=True)
+    if noisy.size == 0 or prob == 0.0:
+        return noisy
+
+    rng = np.random.default_rng(seed)
+    spatial_shape = noisy.shape[:2] if noisy.ndim >= 2 else noisy.shape
+    samples = rng.random(size=spatial_shape)
+
+    half_prob = float(prob) / 2.0
+    pepper_mask = samples < half_prob
+    salt_mask = (samples >= half_prob) & (samples < float(prob))
+
+    noisy[pepper_mask] = 0
+    noisy[salt_mask] = 255
+    return noisy
