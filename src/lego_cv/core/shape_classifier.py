@@ -15,14 +15,8 @@ from lego_cv.core.types import BrickDetection
 
 # 8-сусідні зміщення за годинниковою стрілкою, починаючи з заходу (dy, dx)
 _MOORE_OFFSETS: tuple[tuple[int, int], ...] = (
-    (0, -1),
-    (-1, -1),
-    (-1, 0),
-    (-1, 1),
-    (0, 1),
-    (1, 1),
-    (1, 0),
-    (1, -1),
+    (0, -1), (-1, -1), (-1, 0), (-1, 1),
+    (0, 1), (1, 1), (1, 0), (1, -1),
 )
 _MOORE_STEP_LEN: tuple[float, ...] = tuple(
     1.0 if idx % 2 == 0 else math.sqrt(2.0) for idx in range(8)

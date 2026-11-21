@@ -36,6 +36,11 @@ from lego_cv.core.color_classifier import (
 )
 from lego_cv.core.registry import get_pipeline, list_pipelines
 from lego_cv.core.runner import RunConfig, run_batch
+from lego_cv.core.shape_classifier import (
+    classify_shapes,
+    compute_component_geometry,
+    connected_components_label,
+)
 from lego_cv.core.types import BrickDetection
 from lego_cv.core.visualizer import (
     matches_find_query,
