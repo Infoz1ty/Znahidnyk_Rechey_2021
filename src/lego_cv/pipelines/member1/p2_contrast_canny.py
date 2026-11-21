@@ -8,11 +8,17 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 import numpy as np
 
 from lego_cv.core.base_pipeline import BasePipeline
+from lego_cv.pipelines.member1.p1_color_morph import (
+    fill_holes_manual,
+    morphological_close_manual,
+    morphological_open_manual,
+)
 
 
 def _pad_reflect_2d(channel: np.ndarray, pad: int) -> np.ndarray:
@@ -329,6 +335,118 @@ def otsu_threshold_manual(
     return fg.astype(np.uint8) * 255, threshold
 
 
+def _sobel_gradients_2d(gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Обчислює ручні градієнти Собеля ``(G_x, G_y)`` для 2D-каналу яскравості."""
+    padded = _pad_reflect_2d(gray.astype(np.float64), 1)
+    gx = (
+        -padded[:-2, :-2]
+        + padded[:-2, 2:]
+        - 2.0 * padded[1:-1, :-2]
+        + 2.0 * padded[1:-1, 2:]
+        - padded[2:, :-2]
+        + padded[2:, 2:]
+    )
+    gy = (
+        -padded[:-2, :-2]
+        - 2.0 * padded[:-2, 1:-1]
+        - padded[:-2, 2:]
+        + padded[2:, :-2]
+        + 2.0 * padded[2:, 1:-1]
+        + padded[2:, 2:]
+    )
+    return gx, gy
+
+
+def _non_maximum_suppression(magnitude: np.ndarray, angle_deg: np.ndarray) -> np.ndarray:
+    """Векторизоване придушення немаксимумів (NMS) уздовж 4 квантованих напрямків градієнта."""
+    angle = np.mod(angle_deg, 180.0)
+    padded = np.pad(magnitude, 1, mode="constant", constant_values=0.0)
+    nms = np.zeros_like(magnitude, dtype=np.float64)
+
+    # 0° (горизонтальний градієнт — порівнюємо зліва та справа)
+    m0 = (angle < 22.5) | (angle >= 157.5)
+    keep0 = m0 & (magnitude >= padded[1:-1, :-2]) & (magnitude > padded[1:-1, 2:])
+    nms[keep0] = magnitude[keep0]
+
+    # 45° (градієнт NW <-> SE в координатах зображення +y вниз)
+    m45 = (angle >= 22.5) & (angle < 67.5)
+    keep45 = m45 & (magnitude >= padded[:-2, :-2]) & (magnitude > padded[2:, 2:])
+    nms[keep45] = magnitude[keep45]
+
+    # 90° (вертикальний градієнт — порівнюємо зверху та знизу)
+    m90 = (angle >= 67.5) & (angle < 112.5)
+    keep90 = m90 & (magnitude >= padded[:-2, 1:-1]) & (magnitude > padded[2:, 1:-1])
+    nms[keep90] = magnitude[keep90]
+
+    # 135° (градієнт NE <-> SW)
+    m135 = (angle >= 112.5) & (angle < 157.5)
+    keep135 = m135 & (magnitude >= padded[:-2, 2:]) & (magnitude > padded[2:, :-2])
+    nms[keep135] = magnitude[keep135]
+    return nms
+
+
+def _hysteresis_bfs(
+    nms: np.ndarray,
+    low_threshold: float,
+    high_threshold: float,
+) -> np.ndarray:
+    """Трасування ребер Кенні гістерезисом (8-зв'язний BFS від сильних до слабких пікселів)."""
+    height, width = nms.shape
+    strong = nms >= high_threshold
+    weak = (nms >= low_threshold) & (~strong)
+    edges = strong.copy()
+
+    ys, xs = np.nonzero(strong)
+    queue: deque[tuple[int, int]] = deque(zip(ys.tolist(), xs.tolist()))
+    offsets = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
+
+    while queue:
+        cy, cx = queue.popleft()
+        for dy, dx in offsets:
+            ny, nx = cy + dy, cx + dx
+            if 0 <= ny < height and 0 <= nx < width and weak[ny, nx] and not edges[ny, nx]:
+                edges[ny, nx] = True
+                queue.append((ny, nx))
+
+    return edges.astype(np.uint8) * 255
+
+
+def canny_edge_detector_manual(
+    gray_image: np.ndarray,
+    low_threshold: float = 40.0,
+    high_threshold: float = 120.0,
+) -> np.ndarray:
+    """Ручний детектор границь Кенні: Собель -> NMS -> подвійний поріг -> BFS-гістерезис.
+
+    Args:
+        gray_image: Одноканальне зображення ``(H, W)`` типу ``uint8``.
+        low_threshold: Нижній поріг гістерезису для слабких ребер.
+        high_threshold: Верхній поріг гістерезису для сильних ребер (``>= low_threshold``).
+
+    Returns:
+        Бінарна карта границь ``(H, W)`` типу ``uint8`` (``0`` або ``255``).
+
+    Raises:
+        ValueError: Якщо форма зображення або пороги некоректні.
+    """
+    if gray_image.ndim != 2 or gray_image.size == 0:
+        raise ValueError(f"Очікувався непорожній 2D-масив, отримано форму {gray_image.shape}")
+    if low_threshold < 0.0 or high_threshold < low_threshold:
+        raise ValueError(
+            f"Некоректні пороги Кенні: low={low_threshold}, high={high_threshold}"
+        )
+
+    gray = np.ascontiguousarray(gray_image, dtype=np.uint8)
+    if int(gray.min()) == int(gray.max()):
+        return np.zeros_like(gray, dtype=np.uint8)
+
+    gx, gy = _sobel_gradients_2d(gray)
+    magnitude = np.hypot(gx, gy)
+    angle_deg = np.rad2deg(np.arctan2(gy, gx))
+    nms = _non_maximum_suppression(magnitude, angle_deg)
+    return _hysteresis_bfs(nms, low_threshold=low_threshold, high_threshold=high_threshold)
+
+
 def canny_edge_merge_manual(
     gray_image: np.ndarray,
     otsu_mask: np.ndarray,
@@ -346,9 +464,41 @@ def canny_edge_merge_manual(
     Returns:
         Кортеж ``(final_mask_int32, edges_visual_uint8)``.
     """
-    raise NotImplementedError(
-        "TODO (T2.8, Учасник 1): реалізувати canny_edge_merge_manual."
+    low_thresh = float(stage_cfg.get("low_threshold", 40.0))
+    high_thresh = float(stage_cfg.get("high_threshold", 120.0))
+    merge_otsu = bool(stage_cfg.get("merge_with_otsu", True))
+    close_k = int(stage_cfg.get("edge_close_kernel_size", 3))
+    fill_closed = bool(stage_cfg.get("fill_closed_contours", True))
+
+    edges_vis = canny_edge_detector_manual(
+        gray_image, low_threshold=low_thresh, high_threshold=high_thresh
     )
+    edge_mask = edges_vis > 0
+    if close_k >= 3:
+        edge_mask = morphological_close_manual(edge_mask, kernel_size=close_k)
+
+    if fill_closed:
+        filled_edges = fill_holes_manual(edge_mask)
+        # Відсіюємо розімкнуті тонкі відростки ребер, залишаючи заповнені замкнені області
+        contour_region = filled_edges & (~edge_mask)
+        if np.any(contour_region):
+            edge_region = filled_edges
+            if close_k >= 3 and min(gray_image.shape) > close_k * 2:
+                edge_region = morphological_open_manual(filled_edges, kernel_size=close_k)
+        else:
+            edge_region = edge_mask
+    else:
+        edge_region = edge_mask
+
+    if merge_otsu:
+        combined = (otsu_mask > 0) | edge_region
+        if fill_closed:
+            combined = fill_holes_manual(combined)
+        if close_k >= 3 and min(gray_image.shape) > close_k * 2:
+            combined = morphological_open_manual(combined, kernel_size=close_k)
+        return combined.astype(np.int32), edges_vis
+
+    return edge_region.astype(np.int32), edges_vis
 
 
 class ContrastCannyPipeline(BasePipeline):
