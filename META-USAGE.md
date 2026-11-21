@@ -55,3 +55,30 @@
 * **Згенеровані фрагменти / файли:** `scripts/generate_kaggle_masks.py`, тест `test_kaggle_mask_pipeline_on_5x5_matrix_and_labels_preservation` у `tests/test_core.py`, оновлення `dataset/labels.csv` (550 рядків `kaggle_topdown`) та генерація 550 масок у `dataset/kaggle_masks/`.
 * **Внесені ручні зміни:** Перевірено пласке зіставлення імен `<stem>.png` ↔ `<stem>_mask.png` зі збереженням `.gitkeep`, візуально перевірено маски круглих (`round_1x1` із заповненим центральним отвором), кутових (`corner_brick_2x2`) і прямокутних (`brick_2x4`) деталей, виконано рефакторинг допоміжних функцій під вимоги `pylint` (`too-many-locals`).
 * **Верифікація:** Ручний автотест на синтетичній матриці `7x7` із діркою та шумовим пікселем, перевірка всіх 550 масок (0 порожніх, 0 повністю заповнених, значення строго `{0, 255}`), `pylint src tests scripts` (10.00/10), `pytest -v` (100% pass), `lego-cv --list-pipelines`.
+
+### Запис №3
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 1 (`member1`, `@Infoz1ty`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація спільної інфраструктури зони Учасника 1 (таски `T1.1`–`T1.4`) виключно вручну на стандартній бібліотеці Python + `NumPy` + `Pillow` (лише I/O): захист крайніх випадків (C2) і підтримка `RGBA`-масок у `image_io.py`, посилена валідація конфігів (`config.py`, `default.json`), ручний 2-pass RLE Union-Find CCL, Moore-Neighbor периметр та PCA OBB у `shape_classifier.py`, автотести `tests/test_core.py` та обов'язкові пост-рев'ю у `docs/reviews/`.
+* **Згенеровані фрагменти / файли:** `src/lego_cv/core/image_io.py`, `src/lego_cv/config.py`, `configs/default.json` (`max_image_side_px=10000`), `src/lego_cv/core/shape_classifier.py`, нові тести у `tests/test_core.py`, файли пост-рев'ю `docs/reviews/task_T1.1..T1.4_*_review.md`.
+* **Внесені ручні зміни:** Адаптовано `load_mask_binary` під реальні антиаліасені `RGBA`-маски в `dataset/real_masks/`, підвищено `max_image_side_px` до `10000` під фото `8160×4592` із `dataset/real_u2/`, введено точну зовнішню поправку периметра `+4.0` у Moore-Neighbor (щоб квадрати `30×30` давали `C = pi/4 = 0.7854 < 0.82`, а кола `r=15` — `C = 0.8413 >= 0.82`), виконано декомпозицію допоміжних функцій під `pylint 10.00/10`.
+* **Верифікація:** Ручні матричні тести (`3×3`, `4×4`, `5×5`, квадрат `30×30`, прямокутник `1×4` під `0°` і `45°`, коло `r=15`, порожні/биті файли), перевірка на реальній масці `img_001_mask.png` (`91.6 мс`), `pylint src tests scripts` (`10.00/10`), `pytest -v`.
+
+### Запис №4
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 1 (`member1`, `@Infoz1ty`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Повна ручна реалізація особистих пайплайнів Учасника 1 — **П1** (`p1_color_morph.py`: чанкований медіанний фільтр `5×5`, аналітичне `RGB→HSV` з адаптивною циліндричною оцінкою фону та поліноміальною компенсацією освітлення, роздільна морфологія та scanline-run BFS flood-fill) і **П2** (`p2_contrast_canny.py`: `sRGB→CIE L*`, ручний CLAHE з білінійною інтерполяцією тайлів, роздільний Гаус `3×3`, метод Оцу з автовизначенням полярності, ручний детектор Кенні зі Собелем/NMS/BFS-гістерезисом та злиттям контурів), підбір `configs/pipeline_p1.json` і `pipeline_p2.json`, автотести `tests/test_member1.py` (таски `T2.1`–`T2.10`) та пост-рев'ю у `docs/reviews/`.
+* **Згенеровані фрагменти / файли:** `src/lego_cv/pipelines/member1/p1_color_morph.py`, `src/lego_cv/pipelines/member1/p2_contrast_canny.py`, `configs/pipeline_p1.json`, `configs/pipeline_p2.json`, `tests/test_member1.py`, файли пост-рев'ю `docs/reviews/task_T2.1..T2.10_*_review.md`.
+* **Внесені ручні зміни:** За результатами емпіричної діагностики реальних фото `real_u1` додано апроксимацію 2D-поверхні освітлення фону (`use_illumination_plane`, `value_weight=0.75`, `color_distance_threshold=38.0`), додано `auto_polarity: true` у П2 для коректної сегментації темного фону Kaggle та світлого фону реальних фото, усунуто дублювання коду між П1 і П2 (`pad_reflect_safe`, `extract_border_mask`), уточнено тест CLAHE на обмеження контрасту.
+* **Верифікація:** Ручні юніт-тести `3×3`, `4×4`, `5×5`, `7×7`, `8×8` та наскрізні детерміновані тести в `tests/test_member1.py` (0 skipped, 100% pass), `pylint src tests scripts` (`10.00/10`), `python -m lego_cv.main --list-pipelines`.
+
+### Запис №5
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 1 (`member1`, `@Infoz1ty`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Проведення детермінованого (`seed=42`) порівняльного бенчмарку **П1 vs П2** на 120 зображеннях (`10` реальних `real_u1` на `1600 px` + `110` стратифікованих рендерів Kaggle), побудова 4 діаграм та візуальних панелей стадій на `matplotlib`, підготовка аналітичного звіту `docs/report/member1_p1_vs_p2.md` (таск `T3.3`, критерій B2) та оновлення `META-USAGE.md`.
+* **Згенеровані фрагменти / файли:** `docs/report/member1_p1_vs_p2.md`, `docs/report/p1_vs_p2_metrics.csv`, `docs/report/p1_vs_p2_iou_comparison.png`, `docs/report/p1_vs_p2_denoise_comparison.png`, `docs/report/p1_vs_p2_runtime_stages.png`, `docs/report/p1_vs_p2_visual_stages.png`, `docs/reviews/task_T3.3_p1_vs_p2_analysis_review.md`, `docs/reviews/task_T3.6_meta_usage_review.md`.
+* **Внесені ручні зміни:** Візуально перевірено всі 4 згенеровані графіки, виправлено обрізання довгого підпису Kaggle-файлу на візуальній панелі стадій, звірено всі числові значення в таблицях звіту з `p1_vs_p2_metrics.csv` і порогами критерію C1 у `docs/tz.md`.
+* **Верифікація:** Повний прогін на 120 зображеннях (`seed=42`), візуальний огляд PNG-діаграм, фінальна перевірка `pylint src tests scripts` (`10.00/10`), `pytest -v` (`23 passed, 7 skipped` — усі пропуски лише в зоні Учасника 2), перевірка відсутності змін у файлах Учасника 2 через `git diff --name-only main..HEAD`.
