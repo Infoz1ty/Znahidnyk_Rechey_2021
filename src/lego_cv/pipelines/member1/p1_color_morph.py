@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 import numpy as np
@@ -190,6 +191,195 @@ def hsv_background_segment(
     return (~is_bg).astype(np.uint8) * 255
 
 
+def _validate_odd_kernel(kernel_size: int) -> int:
+    """Перевіряє, що розмір структуруючого ядра є додатним непарним цілим."""
+    if isinstance(kernel_size, bool) or not isinstance(kernel_size, int):
+        raise ValueError(f"kernel_size має бути цілим числом, отримано {kernel_size!r}")
+    if kernel_size < 1 or kernel_size % 2 == 0:
+        raise ValueError(f"kernel_size має бути додатним непарним, отримано {kernel_size}")
+    return kernel_size
+
+
+def binary_dilate_manual(binary_mask: np.ndarray, kernel_size: int = 3) -> np.ndarray:
+    """Ручна роздільна бінарна дилатація квадратним ядром ``k x k`` (1D по X, потім по Y).
+
+    Args:
+        binary_mask: Бінарна або булева маска ``(H, W)``.
+        kernel_size: Непарний розмір квадратного структуруючого елемента.
+
+    Returns:
+        Булева маска ``(H, W)`` після дилатації.
+    """
+    _validate_odd_kernel(kernel_size)
+    if binary_mask.ndim != 2:
+        raise ValueError(f"Очікувалась 2D-маска, отримано форму {binary_mask.shape}")
+    mask = binary_mask > 0
+    if kernel_size == 1 or mask.size == 0:
+        return mask.copy()
+
+    pad = kernel_size // 2
+    width = mask.shape[1]
+    padded_x = np.pad(mask, ((0, 0), (pad, pad)), mode="constant", constant_values=False)
+    horiz = np.zeros_like(mask, dtype=np.bool_)
+    for offset in range(kernel_size):
+        horiz |= padded_x[:, offset : offset + width]
+
+    height = mask.shape[0]
+    padded_y = np.pad(horiz, ((pad, pad), (0, 0)), mode="constant", constant_values=False)
+    result = np.zeros_like(mask, dtype=np.bool_)
+    for offset in range(kernel_size):
+        result |= padded_y[offset : offset + height, :]
+    return result
+
+
+def binary_erode_manual(binary_mask: np.ndarray, kernel_size: int = 3) -> np.ndarray:
+    """Ручна роздільна бінарна ерозія квадратним ядром ``k x k`` (1D по X, потім по Y).
+
+    Args:
+        binary_mask: Бінарна або булева маска ``(H, W)``.
+        kernel_size: Непарний розмір квадратного структуруючого елемента.
+
+    Returns:
+        Булева маска ``(H, W)`` після ерозії.
+    """
+    _validate_odd_kernel(kernel_size)
+    if binary_mask.ndim != 2:
+        raise ValueError(f"Очікувалась 2D-маска, отримано форму {binary_mask.shape}")
+    mask = binary_mask > 0
+    if kernel_size == 1 or mask.size == 0:
+        return mask.copy()
+
+    pad = kernel_size // 2
+    width = mask.shape[1]
+    padded_x = np.pad(mask, ((0, 0), (pad, pad)), mode="constant", constant_values=False)
+    horiz = np.ones_like(mask, dtype=np.bool_)
+    for offset in range(kernel_size):
+        horiz &= padded_x[:, offset : offset + width]
+
+    height = mask.shape[0]
+    padded_y = np.pad(horiz, ((pad, pad), (0, 0)), mode="constant", constant_values=False)
+    result = np.ones_like(mask, dtype=np.bool_)
+    for offset in range(kernel_size):
+        result &= padded_y[offset : offset + height, :]
+    return result
+
+
+def morphological_close_manual(binary_mask: np.ndarray, kernel_size: int = 5) -> np.ndarray:
+    """Ручне морфологічне закриття (дилатація -> ерозія) зі збереженням об'єктів біля меж.
+
+    Розширення полотна нулями на ``pad`` перед дилатацією гарантує властивість
+    екстенсивності закриття навіть для деталей, що торкаються межі кадру.
+
+    Args:
+        binary_mask: Бінарна маска ``(H, W)``.
+        kernel_size: Непарний розмір структуруючого елемента.
+
+    Returns:
+        Булева маска ``(H, W)`` після закриття.
+    """
+    _validate_odd_kernel(kernel_size)
+    mask = binary_mask > 0
+    if kernel_size == 1 or mask.size == 0:
+        return mask.copy()
+
+    pad = kernel_size // 2
+    extended = np.pad(mask, ((pad, pad), (pad, pad)), mode="constant", constant_values=False)
+    closed = binary_erode_manual(binary_dilate_manual(extended, kernel_size), kernel_size)
+    return closed[pad:-pad, pad:-pad]
+
+
+def morphological_open_manual(binary_mask: np.ndarray, kernel_size: int = 3) -> np.ndarray:
+    """Ручне морфологічне відкриття (ерозія -> дилатація) для прибирання дрібного шуму.
+
+    Args:
+        binary_mask: Бінарна маска ``(H, W)``.
+        kernel_size: Непарний розмір структуруючого елемента.
+
+    Returns:
+        Булева маска ``(H, W)`` після відкриття.
+    """
+    _validate_odd_kernel(kernel_size)
+    mask = binary_mask > 0
+    if kernel_size == 1 or mask.size == 0:
+        return mask.copy()
+    return binary_dilate_manual(binary_erode_manual(mask, kernel_size), kernel_size)
+
+
+def _extract_bg_runs(bg_mask: np.ndarray) -> list[list[tuple[int, int]]]:
+    """Виділяє горизонтальні прогони фону ``[start, end)`` для кожного рядка кадру."""
+    height, width = bg_mask.shape
+    padded = np.zeros(width + 2, dtype=np.bool_)
+    row_runs: list[list[tuple[int, int]]] = []
+    for row_idx in range(height):
+        padded[1:-1] = bg_mask[row_idx]
+        diff = np.flatnonzero(padded[1:] != padded[:-1])
+        runs = [(int(diff[pos]), int(diff[pos + 1])) for pos in range(0, diff.size, 2)]
+        row_runs.append(runs)
+    return row_runs
+
+
+def _seed_border_runs(
+    row_runs: list[list[tuple[int, int]]],
+    height: int,
+    width: int,
+) -> tuple[list[list[bool]], deque[tuple[int, int]]]:
+    """Позначає та ставить у чергу BFS усі фонові прогони, що торкаються меж кадру."""
+    visited = [[False] * len(runs) for runs in row_runs]
+    queue: deque[tuple[int, int]] = deque()
+    for row_idx, runs in enumerate(row_runs):
+        for run_idx, (start, end) in enumerate(runs):
+            if row_idx in (0, height - 1) or start == 0 or end == width:
+                visited[row_idx][run_idx] = True
+                queue.append((row_idx, run_idx))
+    return visited, queue
+
+
+def fill_holes_manual(binary_mask: np.ndarray) -> np.ndarray:
+    """Заповнює внутрішні дірки в об'єктах ручним BFS flood-fill від меж зображення.
+
+    Використовує 4-зв'язний BFS (``collections.deque``) по горизонтальних прогонах
+    фону: усі фонові пікселі, недосяжні з 4 зовнішніх меж кадру, вважаються
+    внутрішніми дірками й заповнюються як передній план.
+
+    Args:
+        binary_mask: Бінарна або булева маска ``(H, W)``.
+
+    Returns:
+        Булева маска ``(H, W)`` із заповненими внутрішніми отворами.
+    """
+    if binary_mask.ndim != 2:
+        raise ValueError(f"Очікувалась 2D-маска, отримано форму {binary_mask.shape}")
+    fg = binary_mask > 0
+    height, width = fg.shape
+    if height < 3 or width < 3 or not np.any(fg):
+        return fg.copy()
+
+    row_runs = _extract_bg_runs(~fg)
+    visited, queue = _seed_border_runs(row_runs, height, width)
+
+    while queue:
+        row_idx, run_idx = queue.popleft()
+        start, end = row_runs[row_idx][run_idx]
+        for next_row in (row_idx - 1, row_idx + 1):
+            if not 0 <= next_row < height:
+                continue
+            for n_idx, (n_start, n_end) in enumerate(row_runs[next_row]):
+                if n_start >= end:
+                    break
+                # Умова 4-зв'язного перетину напівінтервалів: start < n_end і n_start < end
+                if n_end > start and not visited[next_row][n_idx]:
+                    visited[next_row][n_idx] = True
+                    queue.append((next_row, n_idx))
+
+    exterior_bg = np.zeros((height, width), dtype=np.bool_)
+    for row_idx, runs in enumerate(row_runs):
+        for run_idx, (start, end) in enumerate(runs):
+            if visited[row_idx][run_idx]:
+                exterior_bg[row_idx, start:end] = True
+
+    return ~exterior_bg
+
+
 def morphological_close_and_fill(
     binary_mask: np.ndarray,
     stage_cfg: dict[str, Any],
@@ -206,9 +396,21 @@ def morphological_close_and_fill(
     Returns:
         Очищена бінарна маска ``(H, W)`` типу ``int32`` (0 — фон, 1 — деталі).
     """
-    raise NotImplementedError(
-        "TODO (T2.3, Учасник 1): реалізувати morphological_close_and_fill."
-    )
+    if binary_mask.ndim != 2:
+        raise ValueError(f"Очікувалась 2D-маска, отримано форму {binary_mask.shape}")
+
+    close_k = int(stage_cfg.get("close_kernel_size", 5))
+    open_k = int(stage_cfg.get("open_kernel_size", 3))
+    do_fill = bool(stage_cfg.get("fill_holes", True))
+
+    mask = binary_mask > 0
+    if close_k >= 3:
+        mask = morphological_close_manual(mask, kernel_size=close_k)
+    if open_k >= 3:
+        mask = morphological_open_manual(mask, kernel_size=open_k)
+    if do_fill:
+        mask = fill_holes_manual(mask)
+    return mask.astype(np.int32)
 
 
 class ColorMorphPipeline(BasePipeline):
