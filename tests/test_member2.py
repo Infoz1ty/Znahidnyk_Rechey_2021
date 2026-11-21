@@ -22,6 +22,14 @@ from lego_cv.pipelines.member2.p3_sobel_watershed import (
     sobel_gradient_manual,
     unsharp_mask_manual,
 )
+from lego_cv.pipelines.member2.p4_fft_texture_hough import (
+    compute_glcm_features,
+    compute_lbp_map,
+    fft1d_manual,
+    fft2_manual,
+    hough_circles_manual,
+    ifft2_manual,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -161,16 +169,119 @@ def test_p3_pipeline_end_to_end_and_edge_cases() -> None:
     assert tiny_res.mask.shape == (3, 3) and tiny_res.mask.dtype == np.int32
 
 
-@pytest.mark.skip(reason="TODO (T2.20, Учасник 2): реалізувати П4 — 2D FFT/IFFT 4x4.")
 def test_p4_fft2_roundtrip_exact_reconstruction() -> None:
-    """Перевіряє точне відновлення матриці 4x4 після ручного 2D FFT -> 2D IFFT."""
+    """Перевіряє точне відновлення матриці 4x4 після ручного 2D FFT -> 2D IFFT та спектр."""
+    # Ручний спектр константи 4x4: F[0, 0] = 5 * 16 = 80, решта = 0
+    const_mat = np.full((4, 4), 5.0, dtype=np.float64)
+    const_spec = fft2_manual(const_mat)
+    assert const_spec[0, 0] == pytest.approx(80.0 + 0.0j, abs=1e-9)
+    const_spec_no_dc = const_spec.copy()
+    const_spec_no_dc[0, 0] = 0.0
+    assert float(np.max(np.abs(const_spec_no_dc))) < 1e-9
+
+    # 1D знакозмінний сигнал [1, -1, 1, -1]: енергія лише на частоті Найквіста k=2 -> 4.0
+    alt_spec = fft1d_manual(np.array([1.0, -1.0, 1.0, -1.0]))
+    assert alt_spec[2] == pytest.approx(4.0 + 0.0j, abs=1e-9)
+    assert abs(alt_spec[0]) < 1e-9
+
+    # Точне відновлення довільної матриці 4x4: |ifft2(fft2(M)) - M| < 1e-5
+    mat = np.array(
+        [
+            [10.0, 20.0, 30.0, 40.0],
+            [50.0, 60.0, 70.0, 80.0],
+            [15.0, 25.0, 35.0, 45.0],
+            [5.0, 12.0, 18.0, 22.0],
+        ],
+        dtype=np.float64,
+    )
+    reconstructed = np.real(ifft2_manual(fft2_manual(mat)))
+    assert float(np.max(np.abs(reconstructed - mat))) < 1e-5
 
 
-@pytest.mark.skip(reason="TODO (T2.20, Учасник 2): реалізувати П4 — LBP 3x3 та GLCM 4x4.")
 def test_p4_lbp_and_glcm_manual_values() -> None:
-    """Перевіряє 8-бітний код LBP у центрі 3x3 та нульовий контраст GLCM на константі."""
+    """Перевіряє 8-бітний код LBP у центрі 3x3 та GLCM на однорідній і шаховій 4x4 матрицях."""
+    # Ручний LBP у центрі (1, 1) = 15: сусіди >= 15 це біти 1 (20), 2 (30), 3 (25), 4 (20) -> 30
+    patch_3x3 = np.array(
+        [[10, 20, 30], [5, 15, 25], [0, 10, 20]],
+        dtype=np.uint8,
+    )
+    lbp = compute_lbp_map(patch_3x3)
+    assert lbp.dtype == np.uint8 and lbp.shape == (3, 3)
+    assert int(lbp[1, 1]) == 30
+
+    # GLCM на однорідній 4x4 матриці: contrast == 0, homogeneity == 1, energy == 1
+    uniform_4x4 = np.full((4, 4), 128, dtype=np.uint8)
+    uni_feats = compute_glcm_features(uniform_4x4, levels=16, distances=(1,))
+    assert uni_feats["contrast"] == pytest.approx(0.0, abs=1e-9)
+    assert uni_feats["homogeneity"] == pytest.approx(1.0, abs=1e-9)
+    assert uni_feats["energy"] == pytest.approx(1.0, abs=1e-9)
+
+    # GLCM на шаховій 4x4 матриці: високий contrast, нижчі homogeneity та energy
+    checker_4x4 = np.array(
+        [
+            [0, 255, 0, 255],
+            [255, 0, 255, 0],
+            [0, 255, 0, 255],
+            [255, 0, 255, 0],
+        ],
+        dtype=np.uint8,
+    )
+    chk_feats = compute_glcm_features(checker_4x4, levels=16, distances=(1,))
+    assert chk_feats["contrast"] > 100.0
+    assert chk_feats["homogeneity"] < 0.6
+    # Аналітично для шахової 4x4: (0.5 + 41/81 + 0.5 + 41/81) / 4 = 81.5/162 ≈ 0.503086
+    assert chk_feats["energy"] == pytest.approx(0.50308642, abs=1e-6)
+    assert chk_feats["energy"] < uni_feats["energy"]
 
 
-@pytest.mark.skip(reason="TODO (T2.20, Учасник 2): реалізувати П4 — Circle Hough + П3/П4 e2e.")
 def test_member2_end_to_end_pipelines() -> None:
-    """Перевіряє детекцію кола Хафа та автоматичний прогін усіх 3 стадій П3 і П4."""
+    """Перевіряє ручний Circle Hough на синтетичному колі та повний прогін П4 (+ C2)."""
+    # Синтетичне коло відомого радіуса r=10 у центрі (20, 20) на кадрі 41x41
+    yy, xx = np.ogrid[:41, :41]
+    circle_img = np.where((xx - 20) ** 2 + (yy - 20) ** 2 <= 10**2, 220, 20).astype(np.uint8)
+    circles = hough_circles_manual(
+        circle_img,
+        radius_min=7,
+        radius_max=13,
+        gradient_threshold=40.0,
+        accumulator_threshold_ratio=0.7,
+        min_center_distance_px=15,
+    )
+    assert len(circles) == 1
+    cx, cy, rad, _ = circles[0]
+    assert abs(cx - 20) <= 1 and abs(cy - 20) <= 1 and abs(rad - 10) <= 1
+
+    # Інтеграційний тест FftTextureHoughPipeline на малому синтетичному RGB-кадрі 44x44
+    with (REPO_ROOT / "configs" / "pipeline_p4.json").open("r", encoding="utf-8") as fh:
+        p4_cfg = json.load(fh)
+    p4_cfg["stage2_lbp_glcm"]["min_component_area_px"] = 25
+    p4_cfg["stage3_hough_circles"]["radius_min_px"] = 5
+    p4_cfg["stage3_hough_circles"]["radius_max_px"] = 9
+    p4_cfg["stage3_hough_circles"]["min_center_distance_px"] = 12
+
+    frame = np.full((44, 44, 3), 10, dtype=np.uint8)
+    frame[8:36, 8:36] = 160
+    fy, fx = np.ogrid[:44, :44]
+    frame[(fx - 22) ** 2 + (fy - 22) ** 2 <= 7**2] = 240
+
+    p4 = FftTextureHoughPipeline()
+    res = p4.run(frame, p4_cfg)
+    assert res.pipeline_id == "p4"
+    assert len(res.stages) == 3
+    assert res.denoised.shape == (44, 44) and res.denoised.dtype == np.uint8
+    assert res.mask.dtype == np.int32 and res.mask.shape == (44, 44)
+    assert 1 in res.metadata["stud_counts"]
+    assert res.metadata["stud_counts"][1] >= 1
+    assert 1 in res.metadata["texture_features"]
+    assert "homogeneity" in res.metadata["texture_features"][1]
+
+    # Крайні випадки C2: однорідний кадр 5x5 та крихітний 4x4 grayscale-RGB
+    flat_res = p4.run(np.full((5, 5, 3), 90, dtype=np.uint8), p4_cfg)
+    assert flat_res.mask.dtype == np.int32 and int(np.max(flat_res.mask)) == 0
+    assert flat_res.metadata["stud_counts"] == {}
+    assert flat_res.metadata["texture_features"] == {}
+
+    tiny_rgb = np.full((4, 4, 3), 50, dtype=np.uint8)
+    tiny_rgb[1:3, 1:3] = 190
+    tiny_res = p4.run(tiny_rgb, p4_cfg)
+    assert tiny_res.mask.shape == (4, 4) and tiny_res.mask.dtype == np.int32
