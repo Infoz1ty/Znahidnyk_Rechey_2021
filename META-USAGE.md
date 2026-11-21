@@ -91,3 +91,12 @@
 * **Згенеровані фрагменти / файли:** `src/lego_cv/pipelines/member2/p4_fft_texture_hough.py`, `configs/pipeline_p4.json`, тести П4 у `tests/test_member2.py`.
 * **Внесені ручні зміни:** Додано збереження DC-складової та контрольоване `low_attenuation = 0.15` у фільтрі Баттерворта для проходження порогів `PSNR/MSE/SSIM`, ерозію внутрішньої маски на 3 пікселі перед Circle Hough (щоб зовнішній прямокутний борт кубика не давав хибних кіл) та підібрано діапазон радіусів `10..24 px` за реальним прогоном на `dataset/real_u2/` (`img_025`: 8/8 шпильок на `2x4`, 4/4 на `2x2`, 0 на гладкому тайлі).
 * **Верифікація:** CLI-бенчмарк на `img_025..027` (`PSNR 33.3–33.9 дБ`, `MSE 26.7–30.7`, `SSIM 0.975–0.980`, `IoU 0.81–0.95`) і 3 рендерах Kaggle (`PSNR 27.2–31.8 дБ`, `IoU 0.974–0.988`), ручні автотести (`4x4` FFT/IFFT roundtrip `< 1e-5`, `3x3` LBP, `4x4` GLCM однорідна/шахова, синтетичне коло Хафа, П4 e2e + C2), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% `test_member2.py`), `python -m lego_cv.main --list-pipelines`.
+
+### Запис №7
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 2 (`member2`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація скрипта зведення метрик і побудови графіків `scripts/compare_pipelines.py` (таск T3.1) на стандартній бібліотеці Python + `NumPy` + `matplotlib` (`Agg`), включно з підтримкою кількох `metrics.csv`, опційного `--labels-csv` для розрізу за сценаріями/сплітами, коректною обробкою `PSNR == inf` та порожніх значень, і додавання юніт-тесту в `tests/test_core.py`.
+* **Згенеровані фрагменти / файли:** `scripts/compare_pipelines.py`, тест `test_compare_pipelines_script_generates_tables_and_charts` у `tests/test_core.py`.
+* **Внесені ручні зміни:** Додано ізольовану активацію non-interactive бекенда `matplotlib.use("Agg")` перед імпортом `pyplot`, окремий підрахунок `psnr_inf_count` (щоб нескінченний PSNR при `MSE == 0` не спотворював середнє і не ламав графіки), підтримку розрізів за сценаріями й сплітами та stacked-візуалізацію часу по стадіях за наявності колонок `stage_1..3_ms`.
+* **Верифікація:** Автотест у `tmp_path` із синтетичним `metrics.csv` (`PSNR=inf`, порожній `IoU`, 2 сценарії) із перевіркою всіх 5 вихідних артефактів (`comparison_summary.md`, `comparison_summary.csv`, `chart_denoise_metrics.png`, `chart_segmentation_classification.png`, `chart_runtime.png`), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% активних тестів), `python scripts/compare_pipelines.py --help`.

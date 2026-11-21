@@ -465,3 +465,62 @@ def test_runner_batch_artifacts_metrics_and_corrupt_file_resilience(tmp_path: Pa
     assert summary["pipelines"]["dummy"]["error_count"] == 1
     assert len(summary["errors"]) == 1
     assert "broken_02.png" in summary["errors"][0]["file"]
+
+
+def _load_compare_pipelines_module():
+    """Завантажує scripts/compare_pipelines.py без зміни sys.path."""
+    script_path = REPO_ROOT / "scripts" / "compare_pipelines.py"
+    spec = importlib.util.spec_from_file_location("compare_pipelines", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_compare_pipelines_script_generates_tables_and_charts(tmp_path: Path) -> None:
+    """Перевіряє агрегацію metrics.csv (з PSNR=inf та порожнім IoU) і генерацію 3 графіків."""
+    mod = _load_compare_pipelines_module()
+
+    metrics_csv = tmp_path / "metrics.csv"
+    metrics_csv.write_text(
+        "image_name,pipeline_id,psnr,mse,ssim,iou,accuracy,precision,recall,f1_score,total_ms\n"
+        "img_01.png,p3,32.5,36.5,0.95,0.88,0.90,0.90,0.90,0.90,1200.0\n"
+        "img_02.png,p3,inf,0.0,1.0,,,, , ,1100.0\n"
+        "img_01.png,p4,30.1,63.2,0.91,0.84,0.85,0.85,0.85,0.85,1800.0\n"
+        "img_02.png,p4,29.5,72.4,0.89,0.92,,,, ,900.0\n",
+        encoding="utf-8",
+    )
+    labels_csv = tmp_path / "labels.csv"
+    labels_csv.write_text(
+        "filename,split,scenario,has_mask,total_count,items_json\n"
+        'real_u2/img_01.png,real_u2,a,true,2,"[""red_2x4_brick""]"\n'
+        'kaggle_topdown/img_02.png,kaggle_topdown,kaggle,true,1,"[""grayscale_2x4_brick""]"\n',
+        encoding="utf-8",
+    )
+
+    out_dir = tmp_path / "report_out"
+    md_path = mod.build_comparison_report([metrics_csv], out_dir, labels_csv=labels_csv)
+
+    expected_files = [
+        out_dir / "comparison_summary.md",
+        out_dir / "comparison_summary.csv",
+        out_dir / "chart_denoise_metrics.png",
+        out_dir / "chart_segmentation_classification.png",
+        out_dir / "chart_runtime.png",
+    ]
+    assert md_path == out_dir / "comparison_summary.md"
+    for artifact in expected_files:
+        assert artifact.is_file() and artifact.stat().st_size > 0
+
+    with (out_dir / "comparison_summary.csv").open("r", encoding="utf-8", newline="") as fh:
+        summary_rows = list(csv.DictReader(fh))
+    overall_p3 = next(
+        row for row in summary_rows if row["scope"] == "overall" and row["pipeline_id"] == "p3"
+    )
+    assert overall_p3["psnr_inf_count"] == "1"
+    assert float(overall_p3["psnr_mean"]) == pytest.approx(32.5, abs=1e-6)
+    assert float(overall_p3["iou_mean"]) == pytest.approx(0.88, abs=1e-6)
+
+    md_text = md_path.read_text(encoding="utf-8")
+    assert "`p3`" in md_text and "`p4`" in md_text
+    assert "Сценарій `kaggle`" in md_text
