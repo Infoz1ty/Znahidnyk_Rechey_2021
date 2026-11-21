@@ -9,7 +9,7 @@ from typing import Sequence
 
 from lego_cv.config import ConfigError, load_pipeline_config
 from lego_cv.core.registry import get_pipeline, list_pipelines
-from lego_cv.core.runner import RunConfig, run_batch
+from lego_cv.core.runner import RunConfig, run_pipelines
 
 
 DEFAULT_CONFIG_PATH = Path("configs/default.json")
@@ -123,6 +123,17 @@ def _print_pipelines() -> None:
         )
 
 
+def _resolve_pipeline_config_path(
+    pipeline_id: str,
+    explicit_config: Path | None,
+) -> Path | None:
+    """Повертає шлях до конфігу пайплайну (явний або стандартний за наявності)."""
+    if explicit_config is not None:
+        return explicit_config
+    default_pipe_cfg = Path(f"configs/pipeline_{pipeline_id}.json")
+    return default_pipe_cfg if default_pipe_cfg.is_file() else None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Головна функція запуску CLI.
 
@@ -151,26 +162,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         cli_overrides.append(f"seed={args.seed}")
 
     try:
+        pipelines_with_configs = []
+        save_stages = bool(args.save_stages)
         for pipeline_id in pipeline_ids:
             pipeline = get_pipeline(pipeline_id)
-            cfg_path = args.config or Path(f"configs/pipeline_{pipeline_id}.json")
+            cfg_path = _resolve_pipeline_config_path(pipeline_id, args.config)
             config = load_pipeline_config(
                 default_config_path=args.default_config,
-                pipeline_config_path=cfg_path if cfg_path.is_file() else None,
+                pipeline_config_path=cfg_path,
                 cli_overrides=cli_overrides,
             )
-            run_cfg = RunConfig(
-                input_path=args.input,
-                output_dir=args.output,
-                mode=args.mode,
-                find_query=args.find,
-                save_stages=args.save_stages or bool(config["output"]["save_stages"]),
-                eval_denoise=args.eval_denoise,
-                masks_dir=args.masks_dir,
-                labels_csv=args.labels_csv,
-            )
-            run_batch(pipeline=pipeline, config=config, run_config=run_cfg)
-    except (ConfigError, NotImplementedError) as exc:
+            save_stages = save_stages or bool(config.get("output", {}).get("save_stages", True))
+            pipelines_with_configs.append((pipeline, config))
+
+        run_cfg = RunConfig(
+            input_path=args.input,
+            output_dir=args.output,
+            mode=args.mode,
+            find_query=args.find,
+            save_stages=save_stages,
+            eval_denoise=args.eval_denoise,
+            masks_dir=args.masks_dir,
+            labels_csv=args.labels_csv,
+        )
+        run_pipelines(pipelines_with_configs=pipelines_with_configs, run_config=run_cfg)
+    except (ConfigError, NotImplementedError, ValueError, KeyError) as exc:
         print(f"[ПОМИЛКА] {exc}", file=sys.stderr)
         return 1
 
