@@ -15,21 +15,12 @@ import numpy as np
 
 from lego_cv.core.base_pipeline import BasePipeline
 from lego_cv.pipelines.member1.p1_color_morph import (
+    extract_border_mask,
     fill_holes_manual,
     morphological_close_manual,
     morphological_open_manual,
+    pad_reflect_safe,
 )
-
-
-def _pad_reflect_2d(channel: np.ndarray, pad: int) -> np.ndarray:
-    """Симетрично доповнює 2D-масив (``reflect``, або ``edge`` для коротких осей)."""
-    if pad <= 0:
-        return channel
-    height, width = channel.shape
-    mode_y = "reflect" if height > pad else "edge"
-    padded_y = np.pad(channel, ((pad, pad), (0, 0)), mode=mode_y)
-    mode_x = "reflect" if width > pad else "edge"
-    return np.pad(padded_y, ((0, 0), (pad, pad)), mode=mode_x)
 
 
 def rgb_to_lab_l_manual(image_rgb: np.ndarray) -> np.ndarray:
@@ -224,13 +215,13 @@ def gaussian_blur_manual(
     kernel /= float(np.sum(kernel))
 
     height, width = channel.shape
-    padded_x = _pad_reflect_2d(channel.astype(np.float64), pad)
+    padded_x = pad_reflect_safe(channel.astype(np.float64), pad)
     mid_slice = padded_x[pad : pad + height, :]
     horiz = np.zeros((height, width), dtype=np.float64)
     for idx, weight in enumerate(kernel):
         horiz += weight * mid_slice[:, idx : idx + width]
 
-    padded_y = _pad_reflect_2d(horiz, pad)
+    padded_y = pad_reflect_safe(horiz, pad)
     mid_cols = padded_y[:, pad : pad + width]
     result = np.zeros((height, width), dtype=np.float64)
     for idx, weight in enumerate(kernel):
@@ -271,11 +262,7 @@ def _resolve_otsu_polarity(gray_image: np.ndarray, threshold: int) -> bool:
     """Визначає полярність фону (``True`` — світлий фон, ``False`` — темний фон) за рамкою."""
     height, width = gray_image.shape
     margin = max(1, min(10, max(1, height // 8), max(1, width // 8)))
-    border = np.zeros((height, width), dtype=np.bool_)
-    border[:margin, :] = True
-    border[-margin:, :] = True
-    border[:, :margin] = True
-    border[:, -margin:] = True
+    border = extract_border_mask(height, width, margin)
     border_median = float(np.median(gray_image[border]))
     return border_median > float(threshold)
 
@@ -337,7 +324,7 @@ def otsu_threshold_manual(
 
 def _sobel_gradients_2d(gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Обчислює ручні градієнти Собеля ``(G_x, G_y)`` для 2D-каналу яскравості."""
-    padded = _pad_reflect_2d(gray.astype(np.float64), 1)
+    padded = pad_reflect_safe(gray.astype(np.float64), 1)
     gx = (
         -padded[:-2, :-2]
         + padded[:-2, 2:]
