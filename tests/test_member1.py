@@ -21,6 +21,14 @@ from lego_cv.pipelines.member1.p1_color_morph import (
     morphological_close_and_fill,
     rgb_to_hsv_manual_p1,
 )
+from lego_cv.pipelines.member1.p2_contrast_canny import (
+    canny_edge_detector_manual,
+    canny_edge_merge_manual,
+    clahe_manual,
+    lab_clahe_enhance_manual,
+    otsu_threshold_manual,
+    rgb_to_lab_l_manual,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = REPO_ROOT / "configs"
@@ -146,16 +154,124 @@ def test_p1_end_to_end_pipeline() -> None:
     assert int(np.count_nonzero(res.mask)) >= 90
 
 
-@pytest.mark.skip(reason="TODO (T2.10, Учасник 1): реалізувати П2 — метод Оцу на 4x4.")
+def test_p2_lab_clahe_enhances_low_contrast_matrix() -> None:
+    """Перевіряє ручне RGB->LAB (L*) і розширення динамічного діапазону через CLAHE."""
+    prim = np.array([[[0, 0, 0], [128, 128, 128], [255, 255, 255]]], dtype=np.uint8)
+    l_vals = rgb_to_lab_l_manual(prim)
+    assert l_vals[0].tolist() == [0, 137, 255]
+
+    low_contrast = np.full((8, 8), 100, dtype=np.uint8)
+    low_contrast[2:6, 2:6] = 120
+    enhanced_low = clahe_manual(low_contrast, tile_grid_rows=2, tile_grid_cols=2, clip_limit=2.0)
+    enhanced_high = clahe_manual(low_contrast, tile_grid_rows=2, tile_grid_cols=2, clip_limit=64.0)
+    assert enhanced_low.dtype == np.uint8
+    span_low = int(enhanced_low.max()) - int(enhanced_low.min())
+    span_high = int(enhanced_high.max()) - int(enhanced_high.min())
+    # CLAHE підсилює вихідний перепад (20), а вищий clip_limit дає ще більший контраст
+    assert span_low > 20
+    assert span_high > span_low
+
+    uniform = np.full((5, 5), 111, dtype=np.uint8)
+    assert np.array_equal(clahe_manual(uniform, 2, 2, 2.0), uniform)
+
+    rgb_low = np.stack([low_contrast] * 3, axis=-1)
+    stage1 = lab_clahe_enhance_manual(
+        rgb_low,
+        {
+            "tile_grid_rows": 2,
+            "tile_grid_cols": 2,
+            "clip_limit": 2.0,
+            "gaussian_kernel_size": 3,
+            "gaussian_sigma": 0.8,
+        },
+    )
+    assert stage1.shape == (8, 8)
+    assert stage1.dtype == np.uint8
+
+
 def test_p2_otsu_threshold_bimodal_matrix() -> None:
-    """Перевіряє ручний поріг Оцу на бімодальній матриці (значення 20 і 200)."""
+    """Перевіряє ручний поріг Оцу на бімодальній матриці 4x4 (20 і 200) та однорідній."""
+    bimodal = np.array(
+        [
+            [20, 20, 200, 200],
+            [20, 20, 200, 200],
+            [20, 20, 200, 200],
+            [20, 20, 200, 200],
+        ],
+        dtype=np.uint8,
+    )
+    mask_dark, thresh = otsu_threshold_manual(bimodal, invert_foreground=True)
+    assert thresh == 110
+    expected_dark = np.zeros((4, 4), dtype=np.uint8)
+    expected_dark[:, :2] = 255
+    assert np.array_equal(mask_dark, expected_dark)
+
+    mask_bright, thresh_b = otsu_threshold_manual(bimodal, invert_foreground=False)
+    assert thresh_b == 110
+    assert np.array_equal(mask_bright, 255 - expected_dark)
+
+    # Крайній випадок: однорідне зображення -> нульова маска без ділення на нуль
+    uniform_mask, uniform_t = otsu_threshold_manual(np.full((4, 4), 90, dtype=np.uint8))
+    assert uniform_t == 90
+    assert np.all(uniform_mask == 0)
 
 
-@pytest.mark.skip(reason="TODO (T2.10, Учасник 1): реалізувати П2 — Кенні на 5x5.")
 def test_p2_canny_detects_vertical_step_edge() -> None:
     """Перевіряє виділення вертикальної границі на ступінчастій матриці 5x5."""
+    step = np.zeros((5, 5), dtype=np.uint8)
+    step[:, 2:] = 200
+    edges = canny_edge_detector_manual(step, low_threshold=40.0, high_threshold=120.0)
+    expected = np.zeros((5, 5), dtype=np.uint8)
+    expected[:, 2] = 255
+    assert np.array_equal(edges, expected)
+
+    with pytest.raises(ValueError):
+        canny_edge_detector_manual(step, low_threshold=100.0, high_threshold=50.0)
+
+    # Перевірка злиття замкненого контуру з порожньою маскою Оцу на 9x9
+    box = np.full((9, 9), 200, dtype=np.uint8)
+    box[2:7, 2:7] = 20
+    merged_mask, edges_vis = canny_edge_merge_manual(
+        gray_image=box,
+        otsu_mask=np.zeros((9, 9), dtype=np.uint8),
+        stage_cfg={
+            "low_threshold": 40.0,
+            "high_threshold": 120.0,
+            "merge_with_otsu": True,
+            "edge_close_kernel_size": 3,
+            "fill_closed_contours": True,
+        },
+    )
+    assert merged_mask.dtype == np.int32
+    assert edges_vis.dtype == np.uint8
+    assert merged_mask[4, 4] == 1
+    assert merged_mask[0, 0] == 0
 
 
-@pytest.mark.skip(reason="TODO (T2.10, Учасник 1): реалізувати наскрізні тести П1 та П2.")
 def test_member1_end_to_end_pipelines() -> None:
-    """Перевіряє автоматичний прогін усіх 3 стадій П1 і П2 зі збереженням StageOutput."""
+    """Перевіряє автоматичний прогін усіх 3 стадій П1 і П2 на світлому та темному фонах."""
+    cfg_p1 = load_pipeline_config(CONFIGS_DIR / "default.json", CONFIGS_DIR / "pipeline_p1.json")
+    cfg_p2 = load_pipeline_config(CONFIGS_DIR / "default.json", CONFIGS_DIR / "pipeline_p2.json")
+    cfg_p1["stage1_median"]["kernel_size"] = 3
+    cfg_p1["stage2_hsv_segmentation"]["border_margin_px"] = 2
+    cfg_p2["stage1_lab_clahe"]["tile_grid_rows"] = 2
+    cfg_p2["stage1_lab_clahe"]["tile_grid_cols"] = 2
+
+    # Сцена 1: світлий папір + темна синя деталь (імітація real_u1)
+    light_scene = np.full((32, 32, 3), 200, dtype=np.uint8)
+    light_scene[10:22, 10:22] = [30, 50, 180]
+
+    # Сцена 2: чорний фон + світло-сіра деталь (імітація Kaggle)
+    dark_scene = np.zeros((32, 32, 3), dtype=np.uint8)
+    dark_scene[10:22, 10:22] = [140, 140, 140]
+
+    for pipeline, cfg in ((ColorMorphPipeline(), cfg_p1), (ContrastCannyPipeline(), cfg_p2)):
+        for scene in (light_scene, dark_scene):
+            res1 = pipeline.run(scene, cfg)
+            res2 = pipeline.run(scene, cfg)
+            assert len(res1.stages) == 3
+            assert res1.mask.dtype == np.int32
+            assert res1.mask[16, 16] == 1
+            assert res1.mask[0, 0] == 0
+            # Повна детермінованість повторного запуску
+            assert np.array_equal(res1.mask, res2.mask)

@@ -5,19 +5,20 @@
   "stage1_lab_clahe": {
     "tile_grid_rows": 8,
     "tile_grid_cols": 8,
-    "clip_limit": 2.0,
+    "clip_limit": 1.2,
     "gaussian_kernel_size": 3,
     "gaussian_sigma": 0.8
   },
   "stage2_otsu": {
     "invert_foreground": true,
+    "auto_polarity": true,
     "histogram_bins": 256
   },
   "stage3_canny": {
-    "low_threshold": 40.0,
-    "high_threshold": 120.0,
+    "low_threshold": 45.0,
+    "high_threshold": 130.0,
     "merge_with_otsu": true,
-    "edge_close_kernel_size": 3,
+    "edge_close_kernel_size": 5,
     "fill_closed_contours": true
   }
 }
