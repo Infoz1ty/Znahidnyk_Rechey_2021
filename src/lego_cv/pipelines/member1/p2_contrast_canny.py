@@ -261,11 +261,43 @@ def lab_clahe_enhance_manual(
     )
 
 
+def _resolve_otsu_polarity(gray_image: np.ndarray, threshold: int) -> bool:
+    """Визначає полярність фону (``True`` — світлий фон, ``False`` — темний фон) за рамкою."""
+    height, width = gray_image.shape
+    margin = max(1, min(10, max(1, height // 8), max(1, width // 8)))
+    border = np.zeros((height, width), dtype=np.bool_)
+    border[:margin, :] = True
+    border[-margin:, :] = True
+    border[:, :margin] = True
+    border[:, -margin:] = True
+    border_median = float(np.median(gray_image[border]))
+    return border_median > float(threshold)
+
+
+def _otsu_between_class_variance(probs: np.ndarray) -> np.ndarray:
+    """Обчислює вектор міжкласової дисперсії Оцу ``sigma_B^2(t)`` для ``t = 0..254``."""
+    bins = np.arange(256, dtype=np.float64)
+    omega0 = np.cumsum(probs)[:-1]
+    omega1 = 1.0 - omega0
+    cum_mean = np.cumsum(probs * bins)[:-1]
+    total_mean = float(np.sum(probs * bins))
+
+    valid = (omega0 > 1e-12) & (omega1 > 1e-12)
+    mu0 = np.where(valid, cum_mean / np.where(valid, omega0, 1.0), 0.0)
+    mu1 = np.where(valid, (total_mean - cum_mean) / np.where(valid, omega1, 1.0), 0.0)
+    return np.where(valid, omega0 * omega1 * ((mu0 - mu1) ** 2), -1.0)
+
+
 def otsu_threshold_manual(
     gray_image: np.ndarray,
     invert_foreground: bool = True,
 ) -> tuple[np.ndarray, int]:
     """Ручна автоматична бінаризація за методом Оцу (максимізація міжкласової дисперсії).
+
+    Обчислює нормовану 256-бінову гістограму ``p(i)`` та знаходить поріг ``t``,
+    що максимізує ``sigma_B^2(t) = omega_0(t) * omega_1(t) * (mu_0(t) - mu_1(t))^2``.
+    При плато однакового максимуму обирає середину інтервалу для найбільшого запасу
+    між модами. Однорідні зображення повертають порожню нульову маску без помилок.
 
     Args:
         gray_image: Одноканальне зображення ``(H, W)`` типу ``uint8``.
@@ -273,8 +305,28 @@ def otsu_threshold_manual(
 
     Returns:
         Кортеж ``(binary_mask_uint8, optimal_threshold)``.
+
+    Raises:
+        ValueError: Якщо вхідний масив не є непорожнім 2D-зображенням.
     """
-    raise NotImplementedError("TODO (T2.7, Учасник 1): реалізувати otsu_threshold_manual.")
+    if gray_image.ndim != 2 or gray_image.size == 0:
+        raise ValueError(f"Очікувався непорожній 2D-масив, отримано форму {gray_image.shape}")
+
+    gray = np.ascontiguousarray(gray_image, dtype=np.uint8)
+    min_val = int(gray.min())
+    if min_val == int(gray.max()):
+        return np.zeros_like(gray, dtype=np.uint8), min_val
+
+    hist = np.bincount(gray.ravel(), minlength=256).astype(np.float64)
+    between_var = _otsu_between_class_variance(hist / float(gray.size))
+    max_var = float(np.max(between_var))
+    if max_var <= 0.0:
+        return np.zeros_like(gray, dtype=np.uint8), min_val
+
+    best_indices = np.flatnonzero(between_var >= max_var - 1e-12)
+    threshold = int(round(0.5 * (int(best_indices[0]) + int(best_indices[-1]))))
+    fg = (gray <= threshold) if invert_foreground else (gray > threshold)
+    return fg.astype(np.uint8) * 255, threshold
 
 
 def canny_edge_merge_manual(
@@ -331,8 +383,16 @@ class ContrastCannyPipeline(BasePipeline):
         stage_cfg = config.get("stage2_otsu", {})
         invert = bool(stage_cfg.get("invert_foreground", True))
         otsu_mask, threshold = otsu_threshold_manual(stage1_output, invert_foreground=invert)
+        if bool(stage_cfg.get("auto_polarity", False)) and np.any(otsu_mask):
+            auto_invert = _resolve_otsu_polarity(stage1_output, threshold)
+            if auto_invert != invert:
+                invert = auto_invert
+                otsu_mask, threshold = otsu_threshold_manual(
+                    stage1_output, invert_foreground=invert
+                )
         next_state = dict(state)
         next_state["otsu_threshold"] = threshold
+        next_state["otsu_invert_foreground"] = invert
         return otsu_mask, next_state
 
     def stage3_refine(
