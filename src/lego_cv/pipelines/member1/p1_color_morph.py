@@ -140,22 +140,89 @@ def _extract_border_mask(height: int, width: int, margin_px: int) -> np.ndarray:
     return border
 
 
+def _fit_quadratic_surface(
+    ys: np.ndarray,
+    xs: np.ndarray,
+    values: np.ndarray,
+    height: int,
+    width: int,
+) -> np.ndarray:
+    """Апроксимує гладку 2D-поверхню поліномом 2-го степеня методом найменших квадратів."""
+    yn = (ys / max(height - 1, 1)) * 2.0 - 1.0
+    xn = (xs / max(width - 1, 1)) * 2.0 - 1.0
+    design = np.column_stack([np.ones_like(xn), xn, yn, xn * xn, xn * yn, yn * yn])
+    coeffs, _, _, _ = np.linalg.lstsq(design, values.astype(np.float64), rcond=None)
+
+    yf = np.linspace(-1.0, 1.0, height, dtype=np.float32)[:, None]
+    xf = np.linspace(-1.0, 1.0, width, dtype=np.float32)[None, :]
+    c = coeffs.astype(np.float32)
+    return c[0] + c[1] * xf + c[2] * yf + c[3] * xf * xf + c[4] * xf * yf + c[5] * yf * yf
+
+
+def _estimate_bg_surface(
+    hsv: np.ndarray,
+    chroma_x: np.ndarray,
+    chroma_y: np.ndarray,
+    bg_s_max: float,
+) -> tuple[float, float, np.ndarray] | None:
+    """Апроксимує плавну 2D-поверхню яскравості фону ``V_bg(x, y)`` поліномом 2-го степеня.
+
+    Компенсує віньєтування та нерівномірне освітлення столу на реальних фото,
+    відбираючи ахроматичні пікселі фону на розрідженій сітці.
+    """
+    height, width = hsv.shape[:2]
+    if height < 16 or width < 16:
+        return None
+
+    step = max(1, min(height, width) // 40)
+    yy, xx = np.meshgrid(np.arange(0, height, step), np.arange(0, width, step), indexing="ij")
+    s_sub = hsv[yy, xx, 1]
+    v_sub = hsv[yy, xx, 2]
+
+    cand = s_sub <= max(bg_s_max, float(np.percentile(s_sub, 40)))
+    if int(np.count_nonzero(cand)) < 12:
+        return None
+
+    v_med = float(np.median(v_sub[cand]))
+    v_mad = float(np.median(np.abs(v_sub[cand] - v_med))) + 1.0
+    refined = cand & (np.abs(v_sub - v_med) <= max(3.5 * v_mad, 35.0))
+    if int(np.count_nonzero(refined)) < 12:
+        refined = cand
+
+    v_surface = _fit_quadratic_surface(yy[refined], xx[refined], v_sub[refined], height, width)
+    bg_cx = float(np.median(chroma_x[yy, xx][refined]))
+    bg_cy = float(np.median(chroma_y[yy, xx][refined]))
+    return bg_cx, bg_cy, v_surface
+
+
 def _adaptive_border_segment(hsv: np.ndarray, stage_cfg: dict[str, Any]) -> np.ndarray:
-    """Адаптивно оцінює фон за рамкою кадру в циліндричних координатах HSV."""
+    """Адаптивно оцінює фон за рамкою або 2D-поверхнею освітлення в циліндричному HSV."""
     h_rad = np.deg2rad(hsv[:, :, 0])
     s_ch = hsv[:, :, 1]
     v_ch = hsv[:, :, 2]
     chroma_x = s_ch * np.cos(h_rad)
     chroma_y = s_ch * np.sin(h_rad)
 
-    border = _extract_border_mask(
-        hsv.shape[0], hsv.shape[1], int(stage_cfg.get("border_margin_px", 20))
-    )
-    bg_cx = float(np.median(chroma_x[border]))
-    bg_cy = float(np.median(chroma_y[border]))
-    bg_v = float(np.median(v_ch[border]))
+    bg_s_max = float(stage_cfg.get("bg_s_max", 45.0))
+    use_plane = bool(stage_cfg.get("use_illumination_plane", False))
+    surface = _estimate_bg_surface(hsv, chroma_x, chroma_y, bg_s_max) if use_plane else None
 
-    dist = np.sqrt((chroma_x - bg_cx) ** 2 + (chroma_y - bg_cy) ** 2 + (v_ch - bg_v) ** 2)
+    if surface is not None:
+        bg_cx, bg_cy, bg_v = surface
+    else:
+        border = _extract_border_mask(
+            hsv.shape[0], hsv.shape[1], int(stage_cfg.get("border_margin_px", 20))
+        )
+        bg_cx = float(np.median(chroma_x[border]))
+        bg_cy = float(np.median(chroma_y[border]))
+        bg_v = float(np.median(v_ch[border]))
+
+    value_weight = float(stage_cfg.get("value_weight", 1.0))
+    dist = np.sqrt(
+        (chroma_x - bg_cx) ** 2
+        + (chroma_y - bg_cy) ** 2
+        + (value_weight * (v_ch - bg_v)) ** 2
+    )
     dist_thresh = float(stage_cfg.get("color_distance_threshold", 30.0))
     return (dist > dist_thresh).astype(np.uint8) * 255
 
@@ -434,7 +501,7 @@ class ColorMorphPipeline(BasePipeline):
         stage_cfg = config.get("stage1_median", {})
         kernel_size = int(stage_cfg.get("kernel_size", 5))
         filtered = median_filter_manual(image_rgb, kernel_size=kernel_size)
-        return filtered, {}
+        return filtered, {"median_kernel_size": kernel_size}
 
     def stage2_segment(
         self,
@@ -445,7 +512,14 @@ class ColorMorphPipeline(BasePipeline):
         """Стадія 2 (Колірна корекція): виділення об'єктів у просторі HSV."""
         stage_cfg = config.get("stage2_hsv_segmentation", {})
         raw_mask = hsv_background_segment(stage1_output, stage_cfg)
-        return raw_mask, state
+        next_state = dict(state)
+        next_state["use_border_bg_estimation"] = bool(
+            stage_cfg.get("use_border_bg_estimation", True)
+        )
+        next_state["use_illumination_plane"] = bool(
+            stage_cfg.get("use_illumination_plane", False)
+        )
+        return raw_mask, next_state
 
     def stage3_refine(
         self,
@@ -456,5 +530,11 @@ class ColorMorphPipeline(BasePipeline):
         """Стадія 3 (Морфологія): закриття контурів та заповнення відблисків."""
         stage_cfg = config.get("stage3_morphology", {})
         final_mask = morphological_close_and_fill(stage2_output, stage_cfg)
-        visual = (final_mask > 0).astype("uint8") * 255
-        return final_mask, visual, {"source_state": bool(state)}
+        visual = (final_mask > 0).astype(np.uint8) * 255
+        metadata = {
+            "median_kernel_size": state.get("median_kernel_size"),
+            "use_border_bg_estimation": state.get("use_border_bg_estimation"),
+            "use_illumination_plane": state.get("use_illumination_plane"),
+            "foreground_pixels": int(np.count_nonzero(final_mask)),
+        }
+        return final_mask, visual, metadata

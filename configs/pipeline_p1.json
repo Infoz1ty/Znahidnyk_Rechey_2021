@@ -10,8 +10,10 @@
     "bg_v_min": 140,
     "bg_v_max": 245,
     "use_border_bg_estimation": true,
+    "use_illumination_plane": true,
     "border_margin_px": 20,
-    "color_distance_threshold": 30.0
+    "value_weight": 0.75,
+    "color_distance_threshold": 38.0
   },
   "stage3_morphology": {
     "close_kernel_size": 5,

@@ -70,7 +70,7 @@
 - [x] **T2.1:** Реалізувати ручний медіанний фільтр $k\times k$ (`median_filter_manual`) із reflect padding.
 - [x] **T2.2:** Реалізувати ручне перетворення `RGB→HSV` та сегментацію фону (`hsv_background_segment`) із підтримкою адаптивної оцінки фону по рамці кадру.
 - [x] **T2.3:** Реалізувати ручні дилатацію, ерозію, морфологічне закриття/відкриття (`morphological_close_manual`) та BFS `flood-fill` заповнення внутрішніх дірок (`fill_holes_manual`).
-- [ ] **T2.4:** Зібрати `ColorMorphPipeline.run()` із поверненням усіх 3 `StageOutput` і підібрати оптимальні параметри в `configs/pipeline_p1.json`.
+- [x] **T2.4:** Зібрати `ColorMorphPipeline.run()` із поверненням усіх 3 `StageOutput` і підібрати оптимальні параметри в `configs/pipeline_p1.json`.
 - [ ] **T2.5 (`tests/test_member1.py`):** Написати ручні автотести на матрицях $3\times 3$ і $5\times 5$ для медіанного фільтра (імпульсний викид), HSV-маски, закриття+заповнення дірки та повного П1.
 
 #### Пайплайн 2 (`src/lego_cv/pipelines/member1/p2_contrast_canny.py` + `configs/pipeline_p2.json`)
