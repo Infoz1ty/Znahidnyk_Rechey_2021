@@ -16,7 +16,7 @@ import numpy as np
 from lego_cv.core.base_pipeline import BasePipeline
 
 
-def _pad_reflect_safe(channel: np.ndarray, pad: int) -> np.ndarray:
+def pad_reflect_safe(channel: np.ndarray, pad: int) -> np.ndarray:
     """Симетрично доповнює 2D-канал (reflect, або edge для осей коротших за ``pad``)."""
     if pad <= 0:
         return channel
@@ -32,7 +32,7 @@ def _median_filter_2d(channel: np.ndarray, kernel_size: int) -> np.ndarray:
     height, width = channel.shape
     pad = kernel_size // 2
     mid = (kernel_size * kernel_size) // 2
-    padded = _pad_reflect_safe(channel, pad)
+    padded = pad_reflect_safe(channel, pad)
 
     result = np.empty((height, width), dtype=np.uint8)
     chunk_rows = 64
@@ -129,7 +129,7 @@ def rgb_to_hsv_manual_p1(image_rgb: np.ndarray) -> np.ndarray:
     return np.stack((h_ch, s_ch, v_ch), axis=-1).astype(np.float32)
 
 
-def _extract_border_mask(height: int, width: int, margin_px: int) -> np.ndarray:
+def extract_border_mask(height: int, width: int, margin_px: int) -> np.ndarray:
     """Формує булеву маску пікселів зовнішньої рамки кадру для оцінки фону."""
     margin = max(1, min(margin_px, max(1, height // 4), max(1, width // 4)))
     border = np.zeros((height, width), dtype=np.bool_)
@@ -210,7 +210,7 @@ def _adaptive_border_segment(hsv: np.ndarray, stage_cfg: dict[str, Any]) -> np.n
     if surface is not None:
         bg_cx, bg_cy, bg_v = surface
     else:
-        border = _extract_border_mask(
+        border = extract_border_mask(
             hsv.shape[0], hsv.shape[1], int(stage_cfg.get("border_margin_px", 20))
         )
         bg_cx = float(np.median(chroma_x[border]))
