@@ -64,3 +64,12 @@
 * **Згенеровані фрагменти / файли:** `src/lego_cv/metrics/noise.py`, `src/lego_cv/metrics/quality.py`, `src/lego_cv/core/color_classifier.py`, юніт-тести в `tests/test_core.py`.
 * **Внесені ручні зміни:** Додано пріоритет хроматичних кольорів над ахроматичними при зіставленні палітри, двоступеневий фолбек після ерозії та фільтрації тіней/відблисків (щоб коректно класифікувати чорні, білі та дрібні деталі), а також перевірено формулу SSIM і циклічної медіани Hue на аналітичних прикладах.
 * **Верифікація:** Ручні розрахунки та юніт-тести на матрицях `3x3`/`5x5`/`7x7` (`MSE == 0 -> PSNR = inf`, `SSIM`, `IoU` для бінарних та інстанс-масок, `seed`-відтворюваність, циклічний червоний `Hue`, ч/б кадр Kaggle), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% активних тестів), `python -m lego_cv.main --list-pipelines`.
+
+### Запис №4
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 2 (`member2`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація таску T1.8 (Модуль В `visualizer.py`, пакетний оркестратор `runner.py`, повний CLI в `main.py`) та юніт-тестів для візуалізатора й раннера у `tests/test_core.py` з дотриманням обмежень Zero-ML/Manual-CV і стійкої обробки битих файлів (C2).
+* **Згенеровані фрагменти / файли:** `src/lego_cv/core/visualizer.py`, `src/lego_cv/core/runner.py`, `src/lego_cv/main.py`, тести `test_visualizer_all_and_find_modes` і `test_runner_batch_artifacts_metrics_and_corrupt_file_resilience` у `tests/test_core.py`.
+* **Внесені ручні зміни:** Додано `run_pipelines` для коректної агрегації `metrics.csv` та `summary.json` при `--pipeline all` без перезапису результатів попередніх пайплайнів, узгодження 2D-виходів Стадії 1 з RGB-еталоном для `PSNR`/`MSE`/`SSIM`, безпечні фолбеки на час до злиття модулів Учасника 1 (`image_io.py`, `shape_classifier.py`) без зміни файлів Учасника 1.
+* **Верифікація:** Автотести `visualizer.py` (`all` / `find`, перевірка `dim_factor` фону та збереження яскравості цілі) і `runner.py` (`DummyPipeline` у `tmp_path`: `stage_1..3`, `detections.json`, `metrics.csv`, `summary.json`, битий файл), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% pass), `python -m lego_cv.main --list-pipelines` та `--help`.

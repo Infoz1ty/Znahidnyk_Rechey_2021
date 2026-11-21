@@ -18,13 +18,20 @@ from lego_cv.config import (
     deep_merge,
     load_pipeline_config,
 )
+from lego_cv.core.base_pipeline import BasePipeline
 from lego_cv.core.color_classifier import (
     binary_erode_manual,
     classify_colors,
     rgb_to_hsv_manual,
 )
 from lego_cv.core.registry import get_pipeline, list_pipelines
+from lego_cv.core.runner import RunConfig, run_batch
 from lego_cv.core.types import BrickDetection
+from lego_cv.core.visualizer import (
+    matches_find_query,
+    render_all_detections,
+    render_search_highlight,
+)
 from lego_cv.main import main as cli_main
 from lego_cv.metrics.noise import add_gaussian_noise, add_salt_pepper_noise
 from lego_cv.metrics.quality import (
@@ -310,3 +317,151 @@ def test_kaggle_mask_pipeline_on_5x5_matrix_and_labels_preservation(tmp_path: Pa
     assert rows[0]["filename"] == "real_u1/u1_a_01_n5.png"
     assert rows[1]["split"] == "kaggle_topdown"
     assert rows[1]["items_json"] == '["grayscale_1x1_round"]'
+
+
+class _DummyPipeline(BasePipeline):
+    """Легкий тестовий пайплайн для перевірки оркестратора runner.py."""
+
+    pipeline_id = "dummy"
+    name = "Тестовий пайплайн"
+    owner = "member2"
+    stage_categories = ("Фільтрація", "Сегментація", "Морфологія")
+
+    def stage1_preprocess(
+        self,
+        image_rgb: np.ndarray,
+        config: dict,
+    ) -> tuple[np.ndarray, dict]:
+        return image_rgb.copy(), {}
+
+    def stage2_segment(
+        self,
+        stage1_output: np.ndarray,
+        state: dict,
+        config: dict,
+    ) -> tuple[np.ndarray, dict]:
+        mask = (stage1_output[..., 0] > 100).astype(np.uint8) * 255
+        return mask, state
+
+    def stage3_refine(
+        self,
+        stage2_output: np.ndarray,
+        state: dict,
+        config: dict,
+    ) -> tuple[np.ndarray, np.ndarray, dict]:
+        inst_mask = (stage2_output > 0).astype(np.int32)
+        return inst_mask, stage2_output.copy(), {}
+
+
+def test_visualizer_all_and_find_modes() -> None:
+    """Перевіряє розмір виходу в режимі all та затемнення фону / підсвітку в режимі find."""
+    with (CONFIGS_DIR / "default.json").open("r", encoding="utf-8") as fh:
+        cfg = json.load(fh)
+
+    img = np.full((60, 60, 3), 100, dtype=np.uint8)
+    img[20:45, 20:45] = [20, 40, 220]  # цільова синя деталь 2x4
+
+    mask = np.zeros((60, 60), dtype=np.int32)
+    mask[20:45, 20:45] = 1
+    det_blue = BrickDetection(
+        brick_id=1,
+        shape_class="2x4",
+        surface_type="brick",
+        color="Blue",
+        stud_count=8,
+        area_px=625.0,
+        aspect_ratio=2.0,
+        circularity=0.78,
+        bbox=(20, 20, 44, 44),
+        center=(32.0, 32.0),
+    )
+
+    assert matches_find_query(det_blue, "blue_2x4")
+    assert matches_find_query(det_blue, "2x4")
+    assert not matches_find_query(det_blue, "red_2x4_tile")
+
+    all_out = render_all_detections(img, [det_blue], cfg)
+    assert all_out.shape == img.shape and all_out.dtype == np.uint8
+    assert np.array_equal(render_all_detections(img, [], cfg), img)
+
+    find_out = render_search_highlight(img, mask, [det_blue], "blue_2x4", cfg)
+    assert find_out.shape == img.shape and find_out.dtype == np.uint8
+    # Фон у куті (0, 0) затемнений на dim_factor = 0.3 -> 100 * 0.3 = 30
+    assert find_out[0, 0].tolist() == [30, 30, 30]
+    # Центр цільової деталі (32, 32) зберіг оригінальну яскравість
+    assert find_out[32, 32].tolist() == [20, 40, 220]
+
+    # Порожній збіг: увесь кадр затемнюється без аварійного винятку
+    no_match = render_search_highlight(img, mask, [det_blue], "red_2x2_tile", cfg)
+    assert no_match[0, 0].tolist() == [30, 30, 30]
+    assert no_match[32, 32].tolist() == [6, 12, 66]
+
+
+def test_runner_batch_artifacts_metrics_and_corrupt_file_resilience(tmp_path: Path) -> None:
+    """Перевіряє збереження stage_1..3, detections.json, metrics.csv, summary.json та C2."""
+    with (CONFIGS_DIR / "default.json").open("r", encoding="utf-8") as fh:
+        cfg = json.load(fh)
+
+    input_dir = tmp_path / "inputs"
+    masks_dir = tmp_path / "masks"
+    output_dir = tmp_path / "results"
+    input_dir.mkdir()
+    masks_dir.mkdir()
+
+    # Валідне зображення з червоною деталлю в центрі + еталонна маска
+    valid_img = np.full((20, 20, 3), 20, dtype=np.uint8)
+    valid_img[5:15, 5:15] = [210, 20, 20]
+    Image.fromarray(valid_img, mode="RGB").save(input_dir / "valid_01.png", format="PNG")
+
+    gt_mask = np.zeros((20, 20), dtype=np.uint8)
+    gt_mask[5:15, 5:15] = 255
+    Image.fromarray(gt_mask, mode="L").save(masks_dir / "valid_01_mask.png", format="PNG")
+
+    # Битий/порожній файл (критерій C2) не повинен зупинити прогін
+    (input_dir / "broken_02.png").write_bytes(b"")
+
+    labels_csv = tmp_path / "labels.csv"
+    labels_csv.write_text(
+        "filename,split,scenario,has_mask,total_count,items_json\n"
+        'inputs/valid_01.png,real_u2,a,true,1,"[""red_unknown""]"\n',
+        encoding="utf-8",
+    )
+
+    run_cfg = RunConfig(
+        input_path=input_dir,
+        output_dir=output_dir,
+        mode="all",
+        save_stages=True,
+        eval_denoise=True,
+        masks_dir=masks_dir,
+        labels_csv=labels_csv,
+    )
+    metrics = run_batch(pipeline=_DummyPipeline(), config=cfg, run_config=run_cfg)
+
+    assert len(metrics) == 1
+    assert metrics[0].image_name == "valid_01.png"
+    assert metrics[0].iou == pytest.approx(1.0, abs=1e-6)
+    assert metrics[0].psnr is not None
+    assert metrics[0].mse is not None
+    assert metrics[0].ssim is not None
+
+    art_dir = output_dir / "dummy" / "valid_01"
+    assert (art_dir / "stage_1_preprocess.png").is_file()
+    assert (art_dir / "stage_2_segment.png").is_file()
+    assert (art_dir / "stage_3_refine.png").is_file()
+    assert (art_dir / "annotated.png").is_file()
+    assert (art_dir / "detections.json").is_file()
+
+    metrics_csv = output_dir / "metrics.csv"
+    summary_json = output_dir / "summary.json"
+    assert metrics_csv.is_file() and summary_json.is_file()
+
+    with metrics_csv.open("r", encoding="utf-8", newline="") as fh:
+        csv_rows = list(csv.DictReader(fh))
+    assert len(csv_rows) == 1 and csv_rows[0]["pipeline_id"] == "dummy"
+
+    summary = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert summary["pipelines"]["dummy"]["processed_count"] == 1
+    assert summary["pipelines"]["dummy"]["error_count"] == 1
+    assert len(summary["errors"]) == 1
+    assert "broken_02.png" in summary["errors"][0]["file"]
