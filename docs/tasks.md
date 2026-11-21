@@ -67,7 +67,7 @@
 ### Учасник 1 (`member1`) — Пайплайни П1 та П2
 
 #### Пайплайн 1 (`src/lego_cv/pipelines/member1/p1_color_morph.py` + `configs/pipeline_p1.json`)
-- [ ] **T2.1:** Реалізувати ручний медіанний фільтр $k\times k$ (`median_filter_manual`) із reflect padding.
+- [x] **T2.1:** Реалізувати ручний медіанний фільтр $k\times k$ (`median_filter_manual`) із reflect padding.
 - [ ] **T2.2:** Реалізувати ручне перетворення `RGB→HSV` та сегментацію фону (`hsv_background_segment`) із підтримкою адаптивної оцінки фону по рамці кадру.
 - [ ] **T2.3:** Реалізувати ручні дилатацію, ерозію, морфологічне закриття/відкриття (`morphological_close_manual`) та BFS `flood-fill` заповнення внутрішніх дірок (`fill_holes_manual`).
 - [ ] **T2.4:** Зібрати `ColorMorphPipeline.run()` із поверненням усіх 3 `StageOutput` і підібрати оптимальні параметри в `configs/pipeline_p1.json`.
