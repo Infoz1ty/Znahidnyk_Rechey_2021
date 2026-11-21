@@ -55,3 +55,12 @@
 * **Згенеровані фрагменти / файли:** `scripts/generate_kaggle_masks.py`, тест `test_kaggle_mask_pipeline_on_5x5_matrix_and_labels_preservation` у `tests/test_core.py`, оновлення `dataset/labels.csv` (550 рядків `kaggle_topdown`) та генерація 550 масок у `dataset/kaggle_masks/`.
 * **Внесені ручні зміни:** Перевірено пласке зіставлення імен `<stem>.png` ↔ `<stem>_mask.png` зі збереженням `.gitkeep`, візуально перевірено маски круглих (`round_1x1` із заповненим центральним отвором), кутових (`corner_brick_2x2`) і прямокутних (`brick_2x4`) деталей, виконано рефакторинг допоміжних функцій під вимоги `pylint` (`too-many-locals`).
 * **Верифікація:** Ручний автотест на синтетичній матриці `7x7` із діркою та шумовим пікселем, перевірка всіх 550 масок (0 порожніх, 0 повністю заповнених, значення строго `{0, 255}`), `pylint src tests scripts` (10.00/10), `pytest -v` (100% pass), `lego-cv --list-pipelines`.
+
+### Запис №3
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 2 (`member2`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація тасків T1.6, T1.7 та частини T1.9 виключно на Python + NumPy: детерміновані генератори шуму (`add_gaussian_noise`, `add_salt_pepper_noise`), ручні метрики (`compute_mse`, `compute_psnr`, `compute_ssim`, `compute_iou`, `compute_classification_metrics`), ручний класифікатор кольору (`binary_erode_manual`, `rgb_to_hsv_manual`, `classify_colors` із циклічним червоним Hue, фільтрацією тіней/відблисків, обробкою ч/б Kaggle та фолбеками) і юніт-тести на малих матрицях (`3x3`/`5x5`) у `tests/test_core.py`.
+* **Згенеровані фрагменти / файли:** `src/lego_cv/metrics/noise.py`, `src/lego_cv/metrics/quality.py`, `src/lego_cv/core/color_classifier.py`, юніт-тести в `tests/test_core.py`.
+* **Внесені ручні зміни:** Додано пріоритет хроматичних кольорів над ахроматичними при зіставленні палітри, двоступеневий фолбек після ерозії та фільтрації тіней/відблисків (щоб коректно класифікувати чорні, білі та дрібні деталі), а також перевірено формулу SSIM і циклічної медіани Hue на аналітичних прикладах.
+* **Верифікація:** Ручні розрахунки та юніт-тести на матрицях `3x3`/`5x5`/`7x7` (`MSE == 0 -> PSNR = inf`, `SSIM`, `IoU` для бінарних та інстанс-масок, `seed`-відтворюваність, циклічний червоний `Hue`, ч/б кадр Kaggle), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% активних тестів), `python -m lego_cv.main --list-pipelines`.

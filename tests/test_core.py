@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -16,8 +18,22 @@ from lego_cv.config import (
     deep_merge,
     load_pipeline_config,
 )
+from lego_cv.core.color_classifier import (
+    binary_erode_manual,
+    classify_colors,
+    rgb_to_hsv_manual,
+)
 from lego_cv.core.registry import get_pipeline, list_pipelines
+from lego_cv.core.types import BrickDetection
 from lego_cv.main import main as cli_main
+from lego_cv.metrics.noise import add_gaussian_noise, add_salt_pepper_noise
+from lego_cv.metrics.quality import (
+    compute_classification_metrics,
+    compute_iou,
+    compute_mse,
+    compute_psnr,
+    compute_ssim,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = REPO_ROOT / "configs"
@@ -94,9 +110,142 @@ def test_image_io_edge_cases() -> None:
     """Тести крайніх випадків: порожній/битий файл, grayscale, RGBA, розмір 3x3."""
 
 
-@pytest.mark.skip(reason="TODO (T1.9, Учасник 2): реалізувати тести PSNR/MSE/SSIM/IoU.")
+def _make_dummy_detection(brick_id: int) -> BrickDetection:
+    """Створює тестову заготовку BrickDetection для перевірки класифікатора кольору."""
+    return BrickDetection(
+        brick_id=brick_id,
+        shape_class="2x2",
+        surface_type="brick",
+        color="Unknown",
+        stud_count=0,
+        area_px=9.0,
+        aspect_ratio=1.0,
+        circularity=0.78,
+        bbox=(0, 0, 4, 4),
+        center=(2.0, 2.0),
+    )
+
+
 def test_quality_metrics_manual_values() -> None:
-    """Перевірка MSE, PSNR, SSIM та IoU на малих матрицях 3x3 з ручним розрахунком."""
+    """Перевірка MSE, PSNR, SSIM, IoU та F1 на малих матрицях 3x3 із ручним розрахунком."""
+    ref = np.array(
+        [[0, 10, 20], [0, 10, 20], [0, 10, 20]],
+        dtype=np.uint8,
+    )
+    shifted = (ref + 10).astype(np.uint8)
+
+    # MSE == 0 -> PSNR = inf, SSIM = 1.0
+    assert compute_mse(ref, ref) == 0.0
+    assert math.isinf(compute_psnr(ref, ref))
+    assert compute_ssim(ref, ref) == pytest.approx(1.0, abs=1e-9)
+
+    # Ручний розрахунок: різниця +10 у кожному пікселі -> MSE = 100.0
+    assert compute_mse(ref, shifted) == pytest.approx(100.0, abs=1e-9)
+    expected_psnr = 10.0 * math.log10((255.0**2) / 100.0)
+    assert compute_psnr(ref, shifted) == pytest.approx(expected_psnr, abs=1e-6)
+
+    # Ручний розрахунок SSIM: var_x == var_y == cov_xy => контрастна частка == 1.0
+    c1 = (0.01 * 255.0) ** 2
+    expected_ssim = (2.0 * 10.0 * 20.0 + c1) / (10.0**2 + 20.0**2 + c1)
+    assert compute_ssim(ref, shifted) == pytest.approx(expected_ssim, abs=1e-9)
+
+    # IoU на 3x3 (підтримка 0/255 та інстанс-масок 0, 1, 2): перетин = 1, об'єднання = 7
+    pred_instance = np.array([[1, 2, 0], [1, 2, 0], [0, 0, 0]], dtype=np.int32)
+    gt_binary = np.array([[0, 0, 0], [0, 255, 255], [0, 255, 255]], dtype=np.uint8)
+    assert compute_iou(pred_instance, gt_binary) == pytest.approx(1.0 / 7.0, abs=1e-9)
+    assert compute_iou(np.zeros((3, 3), dtype=np.uint8), np.zeros((3, 3), dtype=np.uint8)) == 1.0
+
+    # Мультимножинні Accuracy / Precision / Recall / F1 із захистом від ділення на нуль
+    cls_metrics = compute_classification_metrics(
+        predicted_labels=["Red_2x4", "blue_2x2", "blue_2x2"],
+        ground_truth_labels=["red_2x4", "blue_2x2", "yellow_1x1"],
+    )
+    assert cls_metrics["precision"] == pytest.approx(2.0 / 3.0, abs=1e-9)
+    assert cls_metrics["recall"] == pytest.approx(2.0 / 3.0, abs=1e-9)
+    assert cls_metrics["f1_score"] == pytest.approx(2.0 / 3.0, abs=1e-9)
+    assert cls_metrics["accuracy"] == pytest.approx(0.5, abs=1e-9)
+    assert compute_classification_metrics([], ["red_2x4"])["f1_score"] == 0.0
+    assert compute_classification_metrics([], [])["f1_score"] == 1.0
+
+
+def test_noise_generators_determinism_and_uint8_bounds() -> None:
+    """Перевіряє відтворюваність за seed і кліпінг [0..255] для гаусового та S&P шуму."""
+    base = np.full((5, 5, 3), 120, dtype=np.uint8)
+
+    g1 = add_gaussian_noise(base, sigma=25.0, seed=42)
+    g2 = add_gaussian_noise(base, sigma=25.0, seed=42)
+    g3 = add_gaussian_noise(base, sigma=25.0, seed=99)
+    assert g1.dtype == np.uint8 and g1.shape == base.shape
+    assert np.array_equal(g1, g2)
+    assert not np.array_equal(g1, g3)
+    assert np.array_equal(add_gaussian_noise(base, sigma=0.0, seed=42), base)
+
+    sp1 = add_salt_pepper_noise(base, prob=0.4, seed=42)
+    sp2 = add_salt_pepper_noise(base, prob=0.4, seed=42)
+    assert sp1.dtype == np.uint8 and sp1.shape == base.shape
+    assert np.array_equal(sp1, sp2)
+    assert np.array_equal(add_salt_pepper_noise(base, prob=0.0, seed=42), base)
+
+    sp_full = add_salt_pepper_noise(base, prob=1.0, seed=42)
+    assert set(np.unique(sp_full).tolist()).issubset({0, 255})
+
+
+def test_color_classifier_erosion_hsv_cyclic_red_and_grayscale() -> None:
+    """Перевіряє ручну ерозію 3x3, RGB->HSV, циклічний червоний Hue та ч/б Kaggle."""
+    # Ручна ерозія 3x3 на матриці 5x5: із квадрата 3x3 лишається лише центральний піксель
+    mask_5x5 = np.zeros((5, 5), dtype=np.bool_)
+    mask_5x5[1:4, 1:4] = True
+    eroded = binary_erode_manual(mask_5x5, kernel_size=3)
+    expected_eroded = np.zeros((5, 5), dtype=np.bool_)
+    expected_eroded[2, 2] = True
+    assert np.array_equal(eroded, expected_eroded)
+
+    # Ручний RGB -> HSV на еталонних кольорах
+    swatch = np.array(
+        [[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0], [0, 0, 0]]],
+        dtype=np.uint8,
+    )
+    hsv = rgb_to_hsv_manual(swatch)
+    assert hsv.dtype == np.float32
+    assert hsv[0, 0].tolist() == pytest.approx([0.0, 255.0, 255.0], abs=1e-3)
+    assert hsv[0, 1].tolist() == pytest.approx([120.0, 255.0, 255.0], abs=1e-3)
+    assert hsv[0, 2].tolist() == pytest.approx([240.0, 255.0, 255.0], abs=1e-3)
+    assert hsv[0, 3].tolist() == pytest.approx([60.0, 255.0, 255.0], abs=1e-3)
+    assert hsv[0, 4].tolist() == pytest.approx([0.0, 0.0, 0.0], abs=1e-3)
+
+    with (CONFIGS_DIR / "default.json").open("r", encoding="utf-8") as fh:
+        default_cfg = json.load(fh)
+
+    # Циклічний червоний Hue (355° та 5°) + тінь на межі + відблиск у центрі
+    red_frame = np.full((7, 7, 3), 20, dtype=np.uint8)
+    red_frame[2:5, 2:5] = [220, 10, 28]  # H ≈ 355°
+    red_frame[2:5, 3] = [220, 28, 10]  # H ≈ 5°
+    red_frame[3, 3] = [250, 248, 248]  # відблиск (має відфільтруватися)
+    red_frame[1, 1:6] = [15, 15, 15]  # темна межа (має відсіктися ерозією)
+    inst_mask = np.zeros((7, 7), dtype=np.int32)
+    inst_mask[1:6, 1:6] = 1
+    inst_mask[0, 0] = 2  # крихітна 1x1 синя деталь (фолбек після ерозії)
+    red_frame[0, 0] = [20, 60, 220]
+    inst_mask[6, 6] = 3  # чорна деталь V=20 < 40 (фолбек після фільтрації тіні)
+
+    classified = classify_colors(
+        red_frame,
+        inst_mask,
+        [_make_dummy_detection(1), _make_dummy_detection(2), _make_dummy_detection(3)],
+        default_cfg,
+    )
+    assert [det.color for det in classified] == ["Red", "Blue", "Black"]
+
+    # Чорно-білий рендер Kaggle (R == G == B) -> "Grayscale" без помилок
+    gray_frame = np.full((5, 5, 3), 135, dtype=np.uint8)
+    gray_mask = np.ones((5, 5), dtype=np.int32)
+    gray_classified = classify_colors(
+        gray_frame,
+        gray_mask,
+        [_make_dummy_detection(1)],
+        default_cfg,
+    )
+    assert gray_classified[0].color == "Grayscale"
 
 
 def _load_kaggle_mask_module():
