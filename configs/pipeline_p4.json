@@ -3,9 +3,10 @@
   "pipeline_name": "FFT-Texture-Hough Pipeline",
   "owner": "member2",
   "stage1_fft_bandpass": {
-    "low_cutoff_ratio": 0.02,
-    "high_cutoff_ratio": 0.45,
+    "low_cutoff_ratio": 0.01,
+    "high_cutoff_ratio": 0.30,
     "butterworth_order": 2,
+    "low_attenuation": 0.15,
     "pad_to_power_of_two": true
   },
   "stage2_lbp_glcm": {
@@ -13,16 +14,18 @@
     "lbp_neighbors": 8,
     "lbp_window_size": 9,
     "texture_threshold_percentile": 65.0,
+    "min_bg_delta": 14.0,
+    "min_component_area_px": 100,
     "glcm_levels": 16,
     "glcm_distances": [1, 2],
     "glcm_angles_deg": [0, 45, 90, 135]
   },
   "stage3_hough_circles": {
-    "radius_min_px": 7,
-    "radius_max_px": 14,
+    "radius_min_px": 10,
+    "radius_max_px": 24,
     "gradient_threshold": 35.0,
-    "accumulator_threshold_ratio": 0.55,
-    "min_center_distance_px": 18,
+    "accumulator_threshold_ratio": 0.65,
+    "min_center_distance_px": 24,
     "tile_homogeneity_threshold": 0.78
   }
 }
