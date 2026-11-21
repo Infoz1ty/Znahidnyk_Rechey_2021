@@ -23,19 +23,19 @@
 Робота поділена 50/50, кожен модуль реалізується в окремій feature-гілці та зливається через Pull Request.
 
 ### Зона Учасника 1 (`member1`) — Спільний блок
-- [ ] **T1.1 (`src/lego_cv/core/image_io.py` — C2):** Реалізувати завантаження/збереження PNG через `Pillow` із повною обробкою крайніх випадків:
+- [x] **T1.1 (`src/lego_cv/core/image_io.py` — C2):** Реалізувати завантаження/збереження PNG через `Pillow` із повною обробкою крайніх випадків:
   - відсутній або порожній (0 байт) файл $\rightarrow$ `ImageLoadError`;
   - пошкоджений файл / непідтримуваний формат $\rightarrow$ `ImageLoadError`;
   - конвертація 1-канального grayscale і 4-канального RGBA у `uint8 (H, W, 3)`;
   - масштабування довгої сторони до `max_side_px = 1600` (опційно) та перевірка меж розміру.
-- [ ] **T1.2 (`src/lego_cv/config.py`):** Перевірити й доповнити валідацію JSON-конфігів і CLI-перевизначень `--param key=value` (без зміни вихідного коду).
-- [ ] **T1.3 (`src/lego_cv/core/shape_classifier.py` — Модуль А):** Реалізувати вручну (без `cv2`):
+- [x] **T1.2 (`src/lego_cv/config.py`):** Перевірити й доповнити валідацію JSON-конфігів і CLI-перевизначень `--param key=value` (без зміни вихідного коду).
+- [x] **T1.3 (`src/lego_cv/core/shape_classifier.py` — Модуль А):** Реалізувати вручну (без `cv2`):
   - 2-pass Union-Find Connected Components Labeling (CCL) для бінарних масок (та підтримку готових інстанс-масок із П3);
   - фільтрацію сміття $S < 0.5 \cdot S_{1\times 1}$;
   - обчислення площі $S$, периметра $P$ (ручний підрахунок межі/контуру), окружності $C = 4\pi S / P^2$;
   - обчислення орієнтованого прямокутника (PCA головних осей) $\rightarrow$ співвідношення сторін $AR$;
   - зіставлення з таблицею геометричних класів із `configs/default.json`.
-- [ ] **T1.4 (`tests/test_core.py` — C2, C3):** Зняти `@pytest.mark.skip` і написати автотести для `image_io` (биті/порожні файли, grayscale, RGBA, $3\times 3$) та `shape_classifier` (синтетичний квадрат, прямокутник $1\times 4$, круг).
+- [x] **T1.4 (`tests/test_core.py` — C2, C3):** Зняти `@pytest.mark.skip` і написати автотести для `image_io` (биті/порожні файли, grayscale, RGBA, $3\times 3$) та `shape_classifier` (синтетичний квадрат, прямокутник $1\times 4$, круг).
 - [ ] **T1.5 (`dataset/real_u1/` + `dataset/real_masks/`):** Зробити **20 реальних PNG-фото** за пам'яткою [dataset/README.md](../dataset/README.md) (8 вільний розсип + 6 мікс брики/тайли + 6 щільний розсип), заповнити свої рядки в `dataset/labels.csv` і підготувати **10 еталонних масок** у `dataset/real_masks/`.
 
 ### Зона Учасника 2 (`member2`) — Спільний блок
@@ -67,7 +67,7 @@
 ### Учасник 1 (`member1`) — Пайплайни П1 та П2
 
 #### Пайплайн 1 (`src/lego_cv/pipelines/member1/p1_color_morph.py` + `configs/pipeline_p1.json`)
-- [ ] **T2.1:** Реалізувати ручний медіанний фільтр $k\times k$ (`median_filter_manual`) із reflect padding.
+- [x] **T2.1:** Реалізувати ручний медіанний фільтр $k\times k$ (`median_filter_manual`) із reflect padding.
 - [ ] **T2.2:** Реалізувати ручне перетворення `RGB→HSV` та сегментацію фону (`hsv_background_segment`) із підтримкою адаптивної оцінки фону по рамці кадру.
 - [ ] **T2.3:** Реалізувати ручні дилатацію, ерозію, морфологічне закриття/відкриття (`morphological_close_manual`) та BFS `flood-fill` заповнення внутрішніх дірок (`fill_holes_manual`).
 - [ ] **T2.4:** Зібрати `ColorMorphPipeline.run()` із поверненням усіх 3 `StageOutput` і підібрати оптимальні параметри в `configs/pipeline_p1.json`.

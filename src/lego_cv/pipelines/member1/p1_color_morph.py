@@ -8,12 +8,41 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import numpy as np
 
 from lego_cv.core.base_pipeline import BasePipeline
 
-if TYPE_CHECKING:
-    import numpy as np
+
+def _pad_reflect_safe(channel: np.ndarray, pad: int) -> np.ndarray:
+    """Симетрично доповнює 2D-канал (reflect, або edge для осей коротших за ``pad``)."""
+    if pad <= 0:
+        return channel
+    height, width = channel.shape
+    mode_y = "reflect" if height > pad else "edge"
+    padded_y = np.pad(channel, ((pad, pad), (0, 0)), mode=mode_y)
+    mode_x = "reflect" if width > pad else "edge"
+    return np.pad(padded_y, ((0, 0), (pad, pad)), mode=mode_x)
+
+
+def _median_filter_2d(channel: np.ndarray, kernel_size: int) -> np.ndarray:
+    """Застосовує ручний медіанний фільтр ``k x k`` до одного 2D-каналу чанками по рядках."""
+    height, width = channel.shape
+    pad = kernel_size // 2
+    mid = (kernel_size * kernel_size) // 2
+    padded = _pad_reflect_safe(channel, pad)
+
+    result = np.empty((height, width), dtype=np.uint8)
+    chunk_rows = 64
+    for row_start in range(0, height, chunk_rows):
+        row_end = min(row_start + chunk_rows, height)
+        strip = padded[row_start : row_end + 2 * pad, :]
+        windows = np.lib.stride_tricks.sliding_window_view(strip, (kernel_size, kernel_size))
+        flat = windows.reshape(row_end - row_start, width, kernel_size * kernel_size)
+        # Часткове сортування O(k^2) знаходить точну медіану без повного sort
+        result[row_start:row_end] = np.partition(flat, mid, axis=-1)[..., mid]
+    return result
 
 
 def median_filter_manual(image_rgb: np.ndarray, kernel_size: int = 5) -> np.ndarray:
@@ -27,8 +56,28 @@ def median_filter_manual(image_rgb: np.ndarray, kernel_size: int = 5) -> np.ndar
 
     Returns:
         Відфільтроване зображення тієї самої форми типу ``uint8``.
+
+    Raises:
+        ValueError: Якщо ``kernel_size`` не є додатним непарним цілим або форма масиву
+            некоректна.
     """
-    raise NotImplementedError("TODO (T2.1, Учасник 1): реалізувати median_filter_manual.")
+    if isinstance(kernel_size, bool) or not isinstance(kernel_size, int):
+        raise ValueError(f"kernel_size має бути цілим числом, отримано {kernel_size!r}")
+    if kernel_size < 1 or kernel_size % 2 == 0:
+        raise ValueError(f"kernel_size має бути додатним непарним, отримано {kernel_size}")
+    if image_rgb.ndim not in (2, 3) or image_rgb.size == 0:
+        raise ValueError(f"Очікувався непорожній 2D/3D масив, отримано форму {image_rgb.shape}")
+
+    arr_u8 = np.ascontiguousarray(image_rgb, dtype=np.uint8)
+    if kernel_size == 1:
+        return arr_u8.copy()
+    if arr_u8.ndim == 2:
+        return _median_filter_2d(arr_u8, kernel_size)
+
+    output = np.empty_like(arr_u8)
+    for ch_idx in range(arr_u8.shape[2]):
+        output[:, :, ch_idx] = _median_filter_2d(arr_u8[:, :, ch_idx], kernel_size)
+    return output
 
 
 def hsv_background_segment(
