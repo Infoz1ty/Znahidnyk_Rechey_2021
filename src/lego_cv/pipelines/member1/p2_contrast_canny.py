@@ -558,4 +558,10 @@ class ContrastCannyPipeline(BasePipeline):
             otsu_mask=stage2_output,
             stage_cfg=stage_cfg,
         )
-        return final_mask, edges_vis, {"otsu_threshold": state.get("otsu_threshold")}
+        metadata = {
+            "otsu_threshold": state.get("otsu_threshold"),
+            "otsu_invert_foreground": state.get("otsu_invert_foreground"),
+            "edge_pixels": int(np.count_nonzero(edges_vis)),
+            "foreground_pixels": int(np.count_nonzero(final_mask)),
+        }
+        return final_mask, edges_vis, metadata
