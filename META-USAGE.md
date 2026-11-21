@@ -55,3 +55,48 @@
 * **Згенеровані фрагменти / файли:** `scripts/generate_kaggle_masks.py`, тест `test_kaggle_mask_pipeline_on_5x5_matrix_and_labels_preservation` у `tests/test_core.py`, оновлення `dataset/labels.csv` (550 рядків `kaggle_topdown`) та генерація 550 масок у `dataset/kaggle_masks/`.
 * **Внесені ручні зміни:** Перевірено пласке зіставлення імен `<stem>.png` ↔ `<stem>_mask.png` зі збереженням `.gitkeep`, візуально перевірено маски круглих (`round_1x1` із заповненим центральним отвором), кутових (`corner_brick_2x2`) і прямокутних (`brick_2x4`) деталей, виконано рефакторинг допоміжних функцій під вимоги `pylint` (`too-many-locals`).
 * **Верифікація:** Ручний автотест на синтетичній матриці `7x7` із діркою та шумовим пікселем, перевірка всіх 550 масок (0 порожніх, 0 повністю заповнених, значення строго `{0, 255}`), `pylint src tests scripts` (10.00/10), `pytest -v` (100% pass), `lego-cv --list-pipelines`.
+
+### Запис №3
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 2 (`member2`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація тасків T1.6, T1.7 та частини T1.9 виключно на Python + NumPy: детерміновані генератори шуму (`add_gaussian_noise`, `add_salt_pepper_noise`), ручні метрики (`compute_mse`, `compute_psnr`, `compute_ssim`, `compute_iou`, `compute_classification_metrics`), ручний класифікатор кольору (`binary_erode_manual`, `rgb_to_hsv_manual`, `classify_colors` із циклічним червоним Hue, фільтрацією тіней/відблисків, обробкою ч/б Kaggle та фолбеками) і юніт-тести на малих матрицях (`3x3`/`5x5`) у `tests/test_core.py`.
+* **Згенеровані фрагменти / файли:** `src/lego_cv/metrics/noise.py`, `src/lego_cv/metrics/quality.py`, `src/lego_cv/core/color_classifier.py`, юніт-тести в `tests/test_core.py`.
+* **Внесені ручні зміни:** Додано пріоритет хроматичних кольорів над ахроматичними при зіставленні палітри, двоступеневий фолбек після ерозії та фільтрації тіней/відблисків (щоб коректно класифікувати чорні, білі та дрібні деталі), а також перевірено формулу SSIM і циклічної медіани Hue на аналітичних прикладах.
+* **Верифікація:** Ручні розрахунки та юніт-тести на матрицях `3x3`/`5x5`/`7x7` (`MSE == 0 -> PSNR = inf`, `SSIM`, `IoU` для бінарних та інстанс-масок, `seed`-відтворюваність, циклічний червоний `Hue`, ч/б кадр Kaggle), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% активних тестів), `python -m lego_cv.main --list-pipelines`.
+
+### Запис №4
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 2 (`member2`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація таску T1.8 (Модуль В `visualizer.py`, пакетний оркестратор `runner.py`, повний CLI в `main.py`) та юніт-тестів для візуалізатора й раннера у `tests/test_core.py` з дотриманням обмежень Zero-ML/Manual-CV і стійкої обробки битих файлів (C2).
+* **Згенеровані фрагменти / файли:** `src/lego_cv/core/visualizer.py`, `src/lego_cv/core/runner.py`, `src/lego_cv/main.py`, тести `test_visualizer_all_and_find_modes` і `test_runner_batch_artifacts_metrics_and_corrupt_file_resilience` у `tests/test_core.py`.
+* **Внесені ручні зміни:** Додано `run_pipelines` для коректної агрегації `metrics.csv` та `summary.json` при `--pipeline all` без перезапису результатів попередніх пайплайнів, узгодження 2D-виходів Стадії 1 з RGB-еталоном для `PSNR`/`MSE`/`SSIM`, безпечні фолбеки на час до злиття модулів Учасника 1 (`image_io.py`, `shape_classifier.py`) без зміни файлів Учасника 1.
+* **Верифікація:** Автотести `visualizer.py` (`all` / `find`, перевірка `dim_factor` фону та збереження яскравості цілі) і `runner.py` (`DummyPipeline` у `tmp_path`: `stage_1..3`, `detections.json`, `metrics.csv`, `summary.json`, битий файл), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% pass), `python -m lego_cv.main --list-pipelines` та `--help`.
+
+### Запис №5
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 2 (`member2`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація Пайплайну 3 `SobelWatershedPipeline` (таски T2.11–T2.15) виключно на Python + NumPy: векторизований білатеральний фільтр + Unsharp Masking (Стадія 1), ручний оператор Собеля + адаптивна сегментація фону за рамкою кадру (Стадія 2), ручна 2-прохідна карта відстаней Chamfer 3-4 + виділення маркерів + маркерний Watershed на `heapq` (Стадія 3), налаштування `configs/pipeline_p3.json` та юніт-тести П3 у `tests/test_member2.py`.
+* **Згенеровані фрагменти / файли:** `src/lego_cv/pipelines/member2/p3_sobel_watershed.py`, `configs/pipeline_p3.json`, тести П3 у `tests/test_member2.py`.
+* **Внесені ручні зміни:** За результатами тестового прогону на реальних фото `dataset/real_u2/` (зелений фон із віньєтуванням лампи) та рендерах `dataset/kaggle_topdown/` переведено оцінку фону кольорових сцен на нуль-середню хроматичну відстань із квантильною межею (`p98`), замінено точковий NMS по хребту на зв'язні плато-маркери з об'єднанням близьких центроїдів (усунуло перерозділення довгих `2x4` деталей), а також підібрано `unsharp_amount = 0.4` і `peak_min_ratio = 0.65`.
+* **Верифікація:** Прогін CLI на `img_025..027` (`PSNR 33.8–34.2 дБ`, `MSE 24.7–26.8`, `SSIM 0.97–0.98`, `IoU 0.82–0.96`) та 3 рендерах Kaggle (`PSNR 32.5–32.8 дБ`, `IoU 0.986–0.995`), ручні автотести на матрицях `3x3`/`5x5`/`7x13`/`15x15`, `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% pass), `python -m lego_cv.main --list-pipelines`.
+
+### Запис №6
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 2 (`member2`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація Пайплайну 4 `FftTextureHoughPipeline` (таски T2.16–T2.20) виключно на Python + NumPy без `np.fft`/`scipy`/`cv2`: ручний ітеративний 1D/2D Radix-2 FFT Кулі–Тьюкі + фільтр Баттерворта зі збереженням DC (Стадія 1), ручна 8-сусідня карта LBP + сегментація кандидатів + матриця суміжності GLCM (Стадія 2), ручне градієнтне перетворення Хафа для кіл-шпильок усередині bbox деталей (Стадія 3), налаштування `configs/pipeline_p4.json` та повне покриття юніт-тестами `tests/test_member2.py`.
+* **Згенеровані фрагменти / файли:** `src/lego_cv/pipelines/member2/p4_fft_texture_hough.py`, `configs/pipeline_p4.json`, тести П4 у `tests/test_member2.py`.
+* **Внесені ручні зміни:** Додано збереження DC-складової та контрольоване `low_attenuation = 0.15` у фільтрі Баттерворта для проходження порогів `PSNR/MSE/SSIM`, ерозію внутрішньої маски на 3 пікселі перед Circle Hough (щоб зовнішній прямокутний борт кубика не давав хибних кіл) та підібрано діапазон радіусів `10..24 px` за реальним прогоном на `dataset/real_u2/` (`img_025`: 8/8 шпильок на `2x4`, 4/4 на `2x2`, 0 на гладкому тайлі).
+* **Верифікація:** CLI-бенчмарк на `img_025..027` (`PSNR 33.3–33.9 дБ`, `MSE 26.7–30.7`, `SSIM 0.975–0.980`, `IoU 0.81–0.95`) і 3 рендерах Kaggle (`PSNR 27.2–31.8 дБ`, `IoU 0.974–0.988`), ручні автотести (`4x4` FFT/IFFT roundtrip `< 1e-5`, `3x3` LBP, `4x4` GLCM однорідна/шахова, синтетичне коло Хафа, П4 e2e + C2), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% `test_member2.py`), `python -m lego_cv.main --list-pipelines`.
+
+### Запис №7
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 2 (`member2`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація скрипта зведення метрик і побудови графіків `scripts/compare_pipelines.py` (таск T3.1) на стандартній бібліотеці Python + `NumPy` + `matplotlib` (`Agg`), включно з підтримкою кількох `metrics.csv`, опційного `--labels-csv` для розрізу за сценаріями/сплітами, коректною обробкою `PSNR == inf` та порожніх значень, і додавання юніт-тесту в `tests/test_core.py`.
+* **Згенеровані фрагменти / файли:** `scripts/compare_pipelines.py`, тест `test_compare_pipelines_script_generates_tables_and_charts` у `tests/test_core.py`.
+* **Внесені ручні зміни:** Додано ізольовану активацію non-interactive бекенда `matplotlib.use("Agg")` перед імпортом `pyplot`, окремий підрахунок `psnr_inf_count` (щоб нескінченний PSNR при `MSE == 0` не спотворював середнє і не ламав графіки), підтримку розрізів за сценаріями й сплітами та stacked-візуалізацію часу по стадіях за наявності колонок `stage_1..3_ms`.
+* **Верифікація:** Автотест у `tmp_path` із синтетичним `metrics.csv` (`PSNR=inf`, порожній `IoU`, 2 сценарії) із перевіркою всіх 5 вихідних артефактів (`comparison_summary.md`, `comparison_summary.csv`, `chart_denoise_metrics.png`, `chart_segmentation_classification.png`, `chart_runtime.png`), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% активних тестів), `python scripts/compare_pipelines.py --help`.
