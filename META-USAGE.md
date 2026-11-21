@@ -73,3 +73,12 @@
 * **Згенеровані фрагменти / файли:** `src/lego_cv/core/visualizer.py`, `src/lego_cv/core/runner.py`, `src/lego_cv/main.py`, тести `test_visualizer_all_and_find_modes` і `test_runner_batch_artifacts_metrics_and_corrupt_file_resilience` у `tests/test_core.py`.
 * **Внесені ручні зміни:** Додано `run_pipelines` для коректної агрегації `metrics.csv` та `summary.json` при `--pipeline all` без перезапису результатів попередніх пайплайнів, узгодження 2D-виходів Стадії 1 з RGB-еталоном для `PSNR`/`MSE`/`SSIM`, безпечні фолбеки на час до злиття модулів Учасника 1 (`image_io.py`, `shape_classifier.py`) без зміни файлів Учасника 1.
 * **Верифікація:** Автотести `visualizer.py` (`all` / `find`, перевірка `dim_factor` фону та збереження яскравості цілі) і `runner.py` (`DummyPipeline` у `tmp_path`: `stage_1..3`, `detections.json`, `metrics.csv`, `summary.json`, битий файл), `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% pass), `python -m lego_cv.main --list-pipelines` та `--help`.
+
+### Запис №5
+* **Дата:** 2026-11-21
+* **Учасник:** Учасник 2 (`member2`)
+* **Інструмент:** Antigravity (Gemini)
+* **Ключовий запит (промпт):** Реалізація Пайплайну 3 `SobelWatershedPipeline` (таски T2.11–T2.15) виключно на Python + NumPy: векторизований білатеральний фільтр + Unsharp Masking (Стадія 1), ручний оператор Собеля + адаптивна сегментація фону за рамкою кадру (Стадія 2), ручна 2-прохідна карта відстаней Chamfer 3-4 + виділення маркерів + маркерний Watershed на `heapq` (Стадія 3), налаштування `configs/pipeline_p3.json` та юніт-тести П3 у `tests/test_member2.py`.
+* **Згенеровані фрагменти / файли:** `src/lego_cv/pipelines/member2/p3_sobel_watershed.py`, `configs/pipeline_p3.json`, тести П3 у `tests/test_member2.py`.
+* **Внесені ручні зміни:** За результатами тестового прогону на реальних фото `dataset/real_u2/` (зелений фон із віньєтуванням лампи) та рендерах `dataset/kaggle_topdown/` переведено оцінку фону кольорових сцен на нуль-середню хроматичну відстань із квантильною межею (`p98`), замінено точковий NMS по хребту на зв'язні плато-маркери з об'єднанням близьких центроїдів (усунуло перерозділення довгих `2x4` деталей), а також підібрано `unsharp_amount = 0.4` і `peak_min_ratio = 0.65`.
+* **Верифікація:** Прогін CLI на `img_025..027` (`PSNR 33.8–34.2 дБ`, `MSE 24.7–26.8`, `SSIM 0.97–0.98`, `IoU 0.82–0.96`) та 3 рендерах Kaggle (`PSNR 32.5–32.8 дБ`, `IoU 0.986–0.995`), ручні автотести на матрицях `3x3`/`5x5`/`7x13`/`15x15`, `pylint src tests scripts` (`10.00/10`), `pytest -v` (100% pass), `python -m lego_cv.main --list-pipelines`.
